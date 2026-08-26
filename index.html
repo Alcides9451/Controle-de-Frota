@@ -1,0 +1,1880 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerenciador Financeiro</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS (Excel/CSV Export) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- CryptoJS (Hash SHA-256) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    
+    <style>
+        .sidebar-collapsed #sidebar { width: 4.5rem; }
+        .sidebar-collapsed #sidebar .nav-text { display: none; }
+        .sidebar-collapsed #main-content { margin-left: 4.5rem; }
+        .tab-content { animation: fadeIn 0.2s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        tr.recebido { background-color: #f0fdf4; }
+        tr.vencido { background-color: #fef2f2; }
+        tr.pendente { background-color: #fffbeb; }
+        .sidebar-btn.active { background-color: #1e293b; border-left: 4px solid #3b82f6; }
+
+        /* ===== RESPONSIVIDADE (Computador / Celular) ===== */
+        #mobile-topbar { display: none; }
+        #sidebar-overlay { display: none; }
+
+        @media (max-width: 767px) {
+            #mobile-topbar { display: flex; }
+            #sidebar {
+                width: 16rem;
+                transform: translateX(-100%);
+                box-shadow: 0 0 40px rgba(0,0,0,.4);
+            }
+            body.sidebar-open #sidebar { transform: translateX(0); }
+            body.sidebar-open #sidebar-overlay { display: block; }
+            body.sidebar-collapsed #sidebar { width: 16rem; }
+            body.sidebar-collapsed #sidebar .nav-text { display: inline; }
+            #main-content,
+            body.sidebar-collapsed #main-content {
+                margin-left: 0 !important;
+                padding: 0.75rem;
+                padding-top: 4rem;
+            }
+            h1 { font-size: 1.25rem !important; line-height: 1.75rem; }
+            .tab-content > .flex.justify-between { flex-wrap: wrap; gap: 0.5rem; }
+            .tab-content > .flex.justify-between > h1 { width: 100%; }
+            .tab-content > .flex.justify-between .flex.items-center { width: 100%; flex-wrap: wrap; }
+            .tab-content > .flex.justify-between .flex.items-center > button,
+            .tab-content > .flex.justify-between .flex.items-center > div { flex: 1 1 45%; justify-content: center; }
+            table { font-size: 11px; }
+            table th, table td { padding: 0.4rem !important; white-space: nowrap; }
+            .tab-content canvas { max-height: 260px; }
+            /* Evita zoom automático no iOS ao focar campos */
+            input, select, textarea { font-size: 16px !important; }
+        }
+
+        @media (min-width: 768px) {
+            #sidebar-overlay { display: none !important; }
+        }
+
+        @media print {
+            #sidebar, #mobile-topbar, #sidebar-overlay { display: none !important; }
+            #main-content { margin-left: 0 !important; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans text-gray-800 flex h-screen overflow-hidden">
+
+    <!-- BARRA SUPERIOR (APENAS CELULAR) -->
+    <header id="mobile-topbar" class="fixed top-0 left-0 right-0 h-14 bg-slate-900 text-white items-center justify-between px-4 z-30">
+        <button onclick="toggleSidebar()" aria-label="Abrir menu" class="p-2 -ml-2 rounded hover:bg-slate-800">
+            <i data-lucide="menu" class="w-6 h-6"></i>
+        </button>
+        <span id="mobile-title" class="font-bold text-base truncate">Gerenciador</span>
+        <button onclick="fazerLogout()" aria-label="Sair" class="p-2 -mr-2 rounded text-red-400 hover:bg-slate-800">
+            <i data-lucide="log-out" class="w-5 h-5"></i>
+        </button>
+    </header>
+
+    <!-- FUNDO ESCURO DO MENU (CELULAR) -->
+    <div id="sidebar-overlay" onclick="fecharSidebarMobile()" class="fixed inset-0 bg-black bg-opacity-50 z-10"></div>
+
+    <!-- MODAL DE LOGIN -->
+    <div id="modal-login" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
+            <h2 class="text-xl font-bold mb-4 text-center text-gray-800">Acesso ao Sistema</h2>
+            <form id="form-login" onsubmit="autenticarUsuario(event)">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700">Usuário</label>
+                    <input type="text" id="login-usuario" required class="w-full border rounded p-2 mt-1">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700">Senha</label>
+                    <input type="password" id="login-senha" required class="w-full border rounded p-2 mt-1">
+                </div>
+                <div id="login-erro" class="text-red-500 text-sm mb-4 hidden">Usuário ou senha inválidos.</div>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded">Entrar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- BARRA LATERAL (SIDEBAR) -->
+    <aside id="sidebar" class="bg-slate-900 text-white w-64 flex-shrink-0 transition-all duration-300 flex flex-col justify-between h-full fixed z-20">
+        <div>
+            <div class="p-4 flex items-center justify-between border-b border-slate-800">
+                <span class="font-bold text-lg nav-text">Gerenciador</span>
+                <button onclick="toggleSidebar()" class="p-1 hover:bg-slate-800 rounded">
+                    <i data-lucide="menu" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <nav class="mt-4 space-y-1 px-2">
+                <button id="btn-nav-servicos" onclick="switchTab('servicos', event)" class="sidebar-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded text-gray-300 hover:bg-slate-800 transition-colors">
+                    <i data-lucide="truck" class="w-5 h-5 flex-shrink-0"></i>
+                    <span class="nav-text">Serviços Prestados</span>
+                </button>
+                <button id="btn-nav-receber" onclick="switchTab('receber', event)" class="sidebar-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded text-gray-300 hover:bg-slate-800 transition-colors">
+                    <i data-lucide="dollar-sign" class="w-5 h-5 flex-shrink-0"></i>
+                    <span class="nav-text">Valores a Receber</span>
+                </button>
+                <button id="btn-nav-veiculo" onclick="switchTab('veiculo', event)" class="sidebar-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded text-gray-300 hover:bg-slate-800 transition-colors">
+                    <i data-lucide="wrench" class="w-5 h-5 flex-shrink-0"></i>
+                    <span class="nav-text">Gestão do Veículo</span>
+                </button>
+                <button id="btn-nav-relatorios" onclick="switchTab('relatorios', event)" class="sidebar-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded text-gray-300 hover:bg-slate-800 transition-colors">
+                    <i data-lucide="file-text" class="w-5 h-5 flex-shrink-0"></i>
+                    <span class="nav-text">Relatórios</span>
+                </button>
+                <button id="btn-nav-dashboard" onclick="switchTab('dashboard', event)" class="sidebar-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded text-gray-300 hover:bg-slate-800 transition-colors">
+                    <i data-lucide="pie-chart" class="w-5 h-5 flex-shrink-0"></i>
+                    <span class="nav-text">Dashboard</span>
+                </button>
+                <button id="btn-nav-usuarios" onclick="switchTab('usuarios', event)" class="sidebar-btn w-full flex items-center space-x-3 px-3 py-2.5 rounded text-gray-300 hover:bg-slate-800 transition-colors">
+                    <i data-lucide="users" class="w-5 h-5 flex-shrink-0"></i>
+                    <span class="nav-text">Usuários</span>
+                </button>
+            </nav>
+        </div>
+        <div class="p-4 border-t border-slate-800">
+            <div id="usuario-logado-info" class="text-xs text-gray-400 mb-2 nav-text"></div>
+            <button onclick="fazerLogout()" class="w-full flex items-center space-x-2 text-red-400 hover:text-red-300 text-sm">
+                <i data-lucide="log-out" class="w-4 h-4"></i>
+                <span class="nav-text">Sair</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- CONTEÚDO PRINCIPAL -->
+    <main id="main-content" class="flex-1 ml-64 p-6 overflow-y-auto h-full transition-all duration-300">
+
+        <!-- TAB 1: SERVIÇOS PRESTADOS -->
+        <section id="tab-servicos" class="tab-content">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-2xl font-bold">Serviços Prestados</h1>
+                <div class="flex items-center gap-2">
+                    <button onclick="abrirModalServico()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center gap-2">
+                        <i data-lucide="plus" class="w-4 h-4"></i> Novo Lançamento
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filtros -->
+            <div class="bg-white p-4 rounded-lg shadow mb-4 flex flex-wrap gap-3 items-end">
+                <div class="flex-1 min-w-[200px]">
+                    <label class="block text-xs font-semibold text-gray-600">Buscar (Cidade, Região, NF, Romaneio)</label>
+                    <input type="text" id="filtro-servico-busca" oninput="renderizarServicos()" placeholder="Digite para filtrar..." class="w-full border rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Data Inicial</label>
+                    <input type="date" id="filtro-servico-data-inicio" onchange="aplicarDataGlobal('inicio', this.value)" class="border rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Data Final</label>
+                    <input type="date" id="filtro-servico-data-fim" onchange="aplicarDataGlobal('fim', this.value)" class="border rounded p-2 text-sm">
+                </div>
+                <button onclick="limparFiltrosServicos()" class="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm">Limpar Filtros</button>
+                <div class="relative">
+                    <button onclick="toggleColumnMenu('col-menu-servicos')" class="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded text-sm flex items-center gap-1">
+                        <i data-lucide="columns" class="w-4 h-4"></i> Colunas
+                    </button>
+                    <div id="col-menu-servicos" class="hidden absolute right-0 mt-2 bg-white border rounded shadow-lg p-3 z-30 min-w-[180px]"></div>
+                </div>
+            </div>
+
+            <!-- Tabela -->
+            <div class="bg-white rounded-lg shadow overflow-x-auto">
+                <table id="tabela-servicos-main" class="w-full text-left text-xs border-collapse">
+                    <thead class="bg-slate-100 text-slate-700 font-semibold border-b">
+                        <tr>
+                            <th class="p-2.5 border col-0">Data</th>
+                            <th class="p-2.5 border col-1">Romaneio</th>
+                            <th class="p-2.5 border col-2">Nota Fiscal</th>
+                            <th class="p-2.5 border col-3">Cidade</th>
+                            <th class="p-2.5 border col-4">Região</th>
+                            <th class="p-2.5 border col-5">Peso (kg)</th>
+                            <th class="p-2.5 border col-6">Vol.</th>
+                            <th class="p-2.5 border col-7">Vlr Merc.</th>
+                            <th class="p-2.5 border col-8">Frete Transp.</th>
+                            <th class="p-2.5 border col-9">Vlr Cobrado</th>
+                            <th class="p-2.5 border col-10">Vencimento</th>
+                            <th class="p-2.5 border col-11">Data Rec.</th>
+                            <th class="p-2.5 border col-12">Pedágio</th>
+                            <th class="p-2.5 border col-13">Combustível</th>
+                            <th class="p-2.5 border col-14">Litros Abast.</th>
+                            <th class="p-2.5 border col-15">KM Ini</th>
+                            <th class="p-2.5 border col-16">KM Fim</th>
+                            <th class="p-2.5 border col-17">KM Rodado</th>
+                            <th class="p-2.5 border col-18">OC / Coletas</th>
+                            <th class="p-2.5 border col-19">Adicional</th>
+                            <th class="p-2.5 border text-center col-20">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabela-servicos"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- TAB 2: VALORES A RECEBER -->
+        <section id="tab-receber" class="tab-content hidden">
+            <h1 class="text-2xl font-bold mb-4">Valores a Receber</h1>
+
+            <!-- CARDS DE RESUMO -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-green-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Total Recebido</span>
+                    <div id="card-rec-recebido" class="text-xl font-bold text-green-600 mt-1">R$ 0,00</div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-amber-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Pendente</span>
+                    <div id="card-rec-pendente" class="text-xl font-bold text-amber-600 mt-1">R$ 0,00</div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-red-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Vencido</span>
+                    <div id="card-rec-vencido" class="text-xl font-bold text-red-600 mt-1">R$ 0,00</div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Total Geral</span>
+                    <div id="card-rec-total" class="text-xl font-bold text-blue-600 mt-1">R$ 0,00</div>
+                </div>
+            </div>
+
+            <!-- Filtros -->
+            <div class="bg-white p-4 rounded-lg shadow mb-4 flex flex-wrap gap-3 items-end">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Status</label>
+                    <div class="flex items-center gap-3 border rounded p-2 text-sm bg-white">
+                        <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" class="chk-receber-status" value="pendente" onchange="renderizarReceber()"> Pendente</label>
+                        <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" class="chk-receber-status" value="vencido" onchange="renderizarReceber()"> Vencido</label>
+                        <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" class="chk-receber-status" value="recebido" onchange="renderizarReceber()"> Recebido</label>
+                    </div>
+                </div>
+                <div class="flex-1 min-w-[150px]">
+                    <label class="block text-xs font-semibold text-gray-600">Buscar</label>
+                    <input type="text" id="filtro-receber-busca" oninput="renderizarReceber()" placeholder="Cidade, Região, NF..." class="w-full border rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Data Inicial</label>
+                    <input type="date" id="filtro-receber-data-inicio" onchange="aplicarDataGlobal('inicio', this.value)" class="border rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Data Final</label>
+                    <input type="date" id="filtro-receber-data-fim" onchange="aplicarDataGlobal('fim', this.value)" class="border rounded p-2 text-sm">
+                </div>
+                <button onclick="limparFiltrosReceber()" class="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm">Limpar</button>
+                <div class="relative">
+                    <button onclick="toggleColumnMenu('col-menu-receber')" class="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded text-sm flex items-center gap-1">
+                        <i data-lucide="columns" class="w-4 h-4"></i> Colunas
+                    </button>
+                    <div id="col-menu-receber" class="hidden absolute right-0 mt-2 bg-white border rounded shadow-lg p-3 z-30 min-w-[180px]"></div>
+                </div>
+            </div>
+
+            <!-- Tabela -->
+            <div class="bg-white rounded-lg shadow overflow-x-auto">
+                <table id="tabela-receber-main" class="w-full text-left text-xs border-collapse">
+                    <thead class="bg-slate-100 text-slate-700 font-semibold border-b">
+                        <tr>
+                            <th class="p-3 border col-0">Status</th>
+                            <th class="p-3 border col-1">Data Serviço</th>
+                            <th class="p-3 border col-2">Cidade</th>
+                            <th class="p-3 border col-3">Região</th>
+                            <th class="p-3 border col-4">Doc. (NF/Rom)</th>
+                            <th class="p-3 border col-5">Vencimento</th>
+                            <th class="p-3 border col-6">Valor Cobrado</th>
+                            <th class="p-3 border col-7">Adicional</th>
+                            <th class="p-3 border col-8">SubTotal</th>
+                            <th class="p-3 border col-9">Baixa / Data PG</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabela-receber"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- TAB 3: GESTÃO DO VEÍCULO -->
+        <section id="tab-veiculo" class="tab-content hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-2xl font-bold">Gestão do Veículo</h1>
+                <div class="flex gap-2">
+                    <button onclick="abrirModalCategorias()" class="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded text-sm flex items-center gap-1">
+                        <i data-lucide="tag" class="w-4 h-4"></i> Categorias
+                    </button>
+                    <button onclick="abrirModalManutencao()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm flex items-center gap-1">
+                        <i data-lucide="plus" class="w-4 h-4"></i> Nova Manutenção
+                    </button>
+                </div>
+            </div>
+
+            <!-- CARDS DE CUSTO DO VEÍCULO -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-red-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Gasto Total</span>
+                    <div id="totalGasto" class="text-xl font-bold text-red-600 mt-1">R$ 0,00</div>
+                    <div class="mt-2 pt-2 border-t text-xs text-gray-500 uppercase font-bold">Total Serviços (Valor)</div>
+                    <div id="totalServicosManutencao" class="text-base font-bold text-slate-700">R$ 0,00</div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Total KM Rodado</span>
+                    <div id="totalKm" class="text-xl font-bold text-blue-600 mt-1">0 km</div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-purple-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Média Custo / KM</span>
+                    <div id="mediaCustoKm" class="text-xl font-bold text-purple-600 mt-1">R$ 0,00</div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-amber-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Média KM / Litro</span>
+                    <div id="mediaKmL" class="text-xl font-bold text-amber-600 mt-1">0,00 Km/L</div>
+                    <div class="mt-1 text-xs text-gray-500 uppercase font-bold">Litros Abastecidos</div>
+                    <div id="totalLitrosAbast" class="text-sm font-bold text-slate-700">0,00 L</div>
+                    <div class="mt-2 text-xs flex items-center gap-1">
+                        <label>Preço/L DIESEL R$:</label>
+                        <input type="number" step="0.01" id="precoLitro" value="6.00" onchange="renderizarVeiculo()" class="w-16 border rounded p-1 text-xs">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filtros Manutenção -->
+            <div class="bg-white p-4 rounded-lg shadow mb-4 flex flex-wrap gap-3 items-end">
+                <div class="flex-1 min-w-[150px]">
+                    <label class="block text-xs font-semibold text-gray-600">Buscar (Peça, Orçamento)</label>
+                    <input type="text" id="filtro-manutencao-busca" oninput="renderizarVeiculo()" placeholder="Digite para filtrar..." class="w-full border rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Categoria</label>
+                    <select id="filtro-manutencao-categoria" onchange="renderizarVeiculo()" class="border rounded p-2 text-sm">
+                        <option value="todas">Todas as Categorias</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Data Inicial</label>
+                    <input type="date" id="filtro-manutencao-data-inicio" onchange="aplicarDataGlobal('inicio', this.value)" class="border rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Data Final</label>
+                    <input type="date" id="filtro-manutencao-data-fim" onchange="aplicarDataGlobal('fim', this.value)" class="border rounded p-2 text-sm">
+                </div>
+                <button onclick="limparFiltrosManutencao()" class="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm">Limpar</button>
+                <div class="relative">
+                    <button onclick="toggleColumnMenu('col-menu-manutencao')" class="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded text-sm flex items-center gap-1">
+                        <i data-lucide="columns" class="w-4 h-4"></i> Colunas
+                    </button>
+                    <div id="col-menu-manutencao" class="hidden absolute right-0 mt-2 bg-white border rounded shadow-lg p-3 z-30 min-w-[180px]"></div>
+                </div>
+            </div>
+
+            <!-- Tabela Manutenção -->
+            <div class="bg-white rounded-lg shadow overflow-x-auto">
+                <table id="tabela-manutencao-main" class="w-full text-left text-xs border-collapse">
+                    <thead class="bg-slate-100 text-slate-700 font-semibold border-b">
+                        <tr>
+                            <th class="p-3 border col-0">Nº Orçamento</th>
+                            <th class="p-3 border col-1">Data</th>
+                            <th class="p-3 border col-2">Categoria</th>
+                            <th class="p-3 border col-3">Peça / Serviço</th>
+                            <th class="p-3 border col-4">Valor</th>
+                            <th class="p-3 border col-5">Garantia</th>
+                            <th class="p-3 border text-center col-6">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabela-manutencao"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- TAB 4: RELATÓRIOS -->
+        <section id="tab-relatorios" class="tab-content hidden">
+            <h1 class="text-2xl font-bold mb-4">Exportação de Relatórios</h1>
+            <div class="bg-white p-6 rounded-lg shadow mb-6">
+                <h2 class="text-lg font-semibold mb-4 text-slate-700">Filtros de Exportação</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Data Inicial</label>
+                        <input type="date" id="relatorio-data-inicio" class="w-full border rounded p-2 mt-1 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Data Final</label>
+                        <input type="date" id="relatorio-data-fim" class="w-full border rounded p-2 mt-1 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Busca Textual</label>
+                        <input type="text" id="relatorio-busca" placeholder="Cidade, Região, Peça, NF..." class="w-full border rounded p-2 mt-1 text-sm">
+                    </div>
+                </div>
+                <div class="flex justify-end">
+                    <button onclick="limparFiltrosRelatorio()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded text-sm">Limpar Filtros</button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Relatório Serviços -->
+                <div class="bg-white p-6 rounded-lg shadow flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center gap-3 text-blue-600 mb-2">
+                            <i data-lucide="truck" class="w-6 h-6"></i>
+                            <h3 class="text-lg font-bold text-gray-800">Serviços Prestados</h3>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-4">Exporta o histórico completo dos fretes e serviços de transporte lançados.</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="exportarDados('servicos', 'xlsx')" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-3 rounded text-sm flex items-center justify-center gap-1">
+                            <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Excel
+                        </button>
+                        <button onclick="exportarDados('servicos', 'csv')" class="flex-1 bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2 px-3 rounded text-sm flex items-center justify-center gap-1">
+                            <i data-lucide="file-text" class="w-4 h-4"></i> CSV
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Relatório Receber -->
+                <div class="bg-white p-6 rounded-lg shadow flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center gap-3 text-amber-600 mb-2">
+                            <i data-lucide="dollar-sign" class="w-6 h-6"></i>
+                            <h3 class="text-lg font-bold text-gray-800">Valores a Receber</h3>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-4">Exporta o status financeiro de recebimentos (Pendentes, Vencidos e Pagos).</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="exportarDados('receber', 'xlsx')" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-3 rounded text-sm flex items-center justify-center gap-1">
+                            <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Excel
+                        </button>
+                        <button onclick="exportarDados('receber', 'csv')" class="flex-1 bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2 px-3 rounded text-sm flex items-center justify-center gap-1">
+                            <i data-lucide="file-text" class="w-4 h-4"></i> CSV
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Relatório Manutenções -->
+                <div class="bg-white p-6 rounded-lg shadow flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center gap-3 text-red-600 mb-2">
+                            <i data-lucide="wrench" class="w-6 h-6"></i>
+                            <h3 class="text-lg font-bold text-gray-800">Manutenções do Veículo</h3>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-4">Exporta os registros de peças trocadas, serviços mecânicos e garantias.</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="exportarDados('manutencoes', 'xlsx')" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-3 rounded text-sm flex items-center justify-center gap-1">
+                            <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Excel
+                        </button>
+                        <button onclick="exportarDados('manutencoes', 'csv')" class="flex-1 bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2 px-3 rounded text-sm flex items-center justify-center gap-1">
+                            <i data-lucide="file-text" class="w-4 h-4"></i> CSV
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 5: DASHBOARD -->
+        <section id="tab-dashboard" class="tab-content hidden">
+            <h1 class="text-2xl font-bold mb-4">Dashboard Financeiro e Operacional</h1>
+
+            <!-- Filtros do Dashboard -->
+            <div class="bg-white p-4 rounded-lg shadow mb-6 flex flex-wrap gap-3 items-end">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Status Recebimento</label>
+                    <select id="filtro-dash-status" onchange="renderizarDashboard()" class="border rounded p-2 text-sm">
+                        <option value="todos">Todos</option>
+                        <option value="recebido">Recebidos</option>
+                        <option value="pendente">Pendentes</option>
+                        <option value="vencido">Vencidos</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Região</label>
+                    <input type="text" id="filtro-dash-regiao" oninput="renderizarDashboard()" placeholder="Filtrar por região..." class="border rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Data Inicial</label>
+                    <input type="date" id="filtro-dash-inicio" onchange="aplicarDataGlobal('inicio', this.value)" class="border rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Data Final</label>
+                    <input type="date" id="filtro-dash-fim" onchange="aplicarDataGlobal('fim', this.value)" class="border rounded p-2 text-sm">
+                </div>
+                <button onclick="limparFiltrosDashboard()" class="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm">Limpar Filtros</button>
+            </div>
+
+            <!-- CARDS INFORMATIVOS DO DASHBOARD -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Total Peso Transportado</span>
+                    <div id="card-total-peso" class="text-xl font-bold text-blue-600 mt-1">0 kg</div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-amber-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Total Volumes</span>
+                    <div id="card-total-volumes" class="text-xl font-bold text-amber-600 mt-1">0</div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-purple-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Frete Transp. Acumulado</span>
+                    <div id="card-total-frete" class="text-xl font-bold text-purple-600 mt-1">R$ 0,00</div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow border-l-4 border-green-500">
+                    <span class="text-xs font-bold text-gray-500 uppercase">Total Recebido</span>
+                    <div id="card-total-recebido" class="text-xl font-bold text-green-600 mt-1">R$ 0,00</div>
+                    <div id="card-falta-receber" class="text-xs text-gray-500 mt-1"></div>
+                </div>
+            </div>
+
+            <!-- GRÁFICOS -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <div class="bg-white p-4 rounded-lg shadow h-80">
+                    <h3 class="text-sm font-bold text-gray-700 mb-2">Ganhos vs Despesas por Mês <span class="text-xs font-normal text-gray-400">(clique para filtrar o mês)</span></h3>
+                    <div class="h-64"><canvas id="chartFinanceiro"></canvas></div>
+                </div>
+                <div class="bg-white p-4 rounded-lg shadow h-80">
+                    <h3 class="text-sm font-bold text-gray-700 mb-2">Status dos Recebimentos <span class="text-xs font-normal text-gray-400">(clique para filtrar o status)</span></h3>
+                    <div class="h-64"><canvas id="chartStatus"></canvas></div>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow h-80">
+                <h3 class="text-sm font-bold text-gray-700 mb-2">Evolução Mensal: Média de Peso (kg) e Volume por Viagem <span class="text-xs font-normal text-gray-400">(clique para filtrar o mês)</span></h3>
+                <div class="h-64"><canvas id="chartPesoVolume"></canvas></div>
+            </div>
+        </section>
+
+        <!-- TAB 6: USUÁRIOS -->
+        <section id="tab-usuarios" class="tab-content hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h1 class="text-2xl font-bold">Gestão de Usuários</h1>
+                <button onclick="abrirModalUsuario()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center gap-2">
+                    <i data-lucide="user-plus" class="w-4 h-4"></i> Novo Usuário
+                </button>
+            </div>
+            <div class="bg-white rounded-lg shadow overflow-x-auto">
+                <table class="w-full text-left text-sm border-collapse">
+                    <thead class="bg-slate-100 text-slate-700 font-semibold border-b">
+                        <tr>
+                            <th class="p-3 border">Usuário</th>
+                            <th class="p-3 border">Tipo</th>
+                            <th class="p-3 border">Guias Permitidas</th>
+                            <th class="p-3 border text-center">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabela-usuarios"></tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- MODAL NOVO/EDITAR SERVIÇO -->
+    <div id="modal-servico" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-40 hidden p-4 overflow-y-auto">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <h2 id="form-servico-title" class="text-xl font-bold mb-4">Novo Lançamento</h2>
+            <form id="form-servico" onsubmit="salvarServico(event)" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <input type="hidden" id="edit-id">
+                <div><label class="block font-semibold">Data Serviço</label><input type="date" id="dataServico" required class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Romaneio</label><input type="text" id="romaneio" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Nota Fiscal</label><input type="text" id="notaFiscal" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Cidade</label><input type="text" id="cidade" required class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Região</label><input type="text" id="regiao" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Peso (kg)</label><input type="number" step="0.01" id="peso" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Volumes</label><input type="number" id="volumes" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Vlr Mercadoria</label><input type="number" step="0.01" id="vlrMercadoria" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Frete Transp.</label><input type="number" step="0.01" id="freteTransp" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Valor Cobrado</label><input type="number" step="0.01" id="valorCobrado" required class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Vencimento</label><input type="date" id="vencimento" required class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Data Recebido</label><input type="date" id="dataRecebido" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Pedágio R$</label><input type="number" step="0.01" id="vlrPedagio" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Combustível R$</label><input type="number" step="0.01" id="vlrCombustivel" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Litros Abast.</label><input type="number" step="0.01" id="litrosAbast" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">KM Inicial</label><input type="number" id="kmInicial" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">KM Final</label><input type="number" id="kmFinal" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">OC / Coletas</label><input type="text" id="ocColetas" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Adicional R$</label><input type="number" step="0.01" id="adicional" class="w-full border rounded p-2"></div>
+                
+                <div class="md:col-span-3 flex justify-end gap-2 mt-4">
+                    <button type="button" onclick="fecharModalServico()" class="bg-gray-300 hover:bg-gray-400 px-4 py-2 rounded">Cancelar</button>
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL MANUTENÇÃO -->
+    <div id="modal-manutencao" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-40 hidden p-4 overflow-y-auto">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <h2 class="text-xl font-bold mb-4">Nova Manutenção / Peça</h2>
+            <form id="form-manutencao" onsubmit="salvarManutencao(event)" class="space-y-3 text-sm">
+                <div><label class="block font-semibold">Nº Orçamento</label><input type="text" id="orcamentoNo" class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Data</label><input type="date" id="dataManutencao" required class="w-full border rounded p-2"></div>
+                <div>
+                    <label class="block font-semibold">Categoria</label>
+                    <select id="categoriaManutencao" class="w-full border rounded p-2"></select>
+                </div>
+                <div><label class="block font-semibold">Peça Trocada / Serviço</label><input type="text" id="pecaTrocada" required class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Valor R$</label><input type="number" step="0.01" id="vlrManutencao" required class="w-full border rounded p-2"></div>
+                <div><label class="block font-semibold">Data Garantia</label><input type="date" id="dataGarantia" class="w-full border rounded p-2"></div>
+
+                <div class="flex justify-end gap-2 mt-4">
+                    <button type="button" onclick="fecharModalManutencao()" class="bg-gray-300 hover:bg-gray-400 px-4 py-2 rounded">Cancelar</button>
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL CATEGORIAS -->
+    <div id="modal-categorias" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-40 hidden p-4 overflow-y-auto">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h2 class="text-xl font-bold mb-4">Gerenciar Categorias</h2>
+            <form onsubmit="salvarCategoria(event)" class="flex gap-2 mb-4">
+                <input type="text" id="nomeCategoria" placeholder="Nova categoria..." required class="flex-1 border rounded p-2 text-sm">
+                <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded text-sm font-bold">Adicionar</button>
+            </form>
+            <ul id="lista-categorias" class="max-h-60 overflow-y-auto divide-y text-sm mb-4"></ul>
+            <div class="flex justify-end">
+                <button type="button" onclick="fecharModalCategorias()" class="bg-gray-300 hover:bg-gray-400 px-4 py-2 rounded text-sm">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL USUÁRIO -->
+    <div id="modal-usuario" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-40 hidden p-4 overflow-y-auto">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h2 id="form-usuario-title" class="text-xl font-bold mb-4">Novo Usuário</h2>
+            <form id="form-usuario" onsubmit="salvarUsuario(event)" class="space-y-3 text-sm">
+                <input type="hidden" id="edit-usuario-original">
+                <div>
+                    <label class="block font-semibold">Nome de Usuário</label>
+                    <input type="text" id="usr-nome" required class="w-full border rounded p-2">
+                </div>
+                <div>
+                    <label class="block font-semibold">Senha (deixe em branco para manter a atual se estiver editando)</label>
+                    <input type="password" id="usr-senha" class="w-full border rounded p-2">
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="usr-admin" onchange="toggleAdminCheckboxStatus()" class="rounded text-blue-600">
+                    <label for="usr-admin" class="font-semibold">Usuário Administrador (Acesso total)</label>
+                </div>
+                <div id="container-permissoes" class="border p-3 rounded bg-gray-50">
+                    <span class="block font-semibold mb-2">Permissões de Guias:</span>
+                    <div class="space-y-1">
+                        <label class="flex items-center gap-2"><input type="checkbox" value="servicos" class="chk-guia"> Serviços Prestados</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="receber" class="chk-guia"> Valores a Receber</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="veiculo" class="chk-guia"> Gestão do Veículo</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="relatorios" class="chk-guia"> Relatórios</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="dashboard" class="chk-guia"> Dashboard</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="usuarios" class="chk-guia"> Usuários</label>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-4">
+                    <button type="button" onclick="fecharModalUsuario()" class="bg-gray-300 hover:bg-gray-400 px-4 py-2 rounded">Cancelar</button>
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- SCRIPT DA APLICAÇÃO -->
+    <script>
+        const DB_NAME = 'GerenciadorFinanceiroDB';
+        const DB_VERSION = 5;
+        let db = null;
+
+        let chartFinanceiroInstance = null;
+        let chartStatusInstance = null;
+        let chartPesoVolumeInstance = null;
+        let usuarioAtualObjeto = null;
+
+        const columnStates = {
+            'tabela-servicos-main': {},
+            'tabela-receber-main': {},
+            'tabela-manutencao-main': {}
+        };
+
+        function formatarDataBR(dataISO) {
+            if (!dataISO) return '';
+            const partes = dataISO.split('-');
+            if (partes.length === 3) {
+                return `${partes[2]}/${partes[1]}/${partes[0]}`;
+            }
+            return dataISO;
+        }
+
+        function formatarMesAnoBR(mesISO) {
+            if (!mesISO) return '';
+            const partes = mesISO.split('-');
+            if (partes.length === 2) {
+                return `${partes[1]}/${partes[0]}`;
+            }
+            return mesISO;
+        }
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains('servicos')) db.createObjectStore('servicos', { keyPath: 'id' });
+                    if (!db.objectStoreNames.contains('manutencoes')) db.createObjectStore('manutencoes', { keyPath: 'id' });
+                    if (!db.objectStoreNames.contains('categorias')) db.createObjectStore('categorias', { keyPath: 'id' });
+                    if (!db.objectStoreNames.contains('usuarios')) db.createObjectStore('usuarios', { keyPath: 'usuario' });
+                };
+                request.onsuccess = (e) => { db = e.target.result; resolve(db); };
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        function getAllData(storeName) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readonly');
+                const store = tx.objectStore(storeName);
+                const request = store.getAll();
+                request.onsuccess = () => resolve(request.result || []);
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        function putData(storeName, data) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const request = store.put(data);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        function deleteData(storeName, id) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const request = store.delete(id);
+                request.onsuccess = () => resolve();
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        function gerarHashSHA256(texto) {
+            return CryptoJS.SHA256(texto).toString(CryptoJS.enc.Hex);
+        }
+
+        async function inicializarUsuarioPadrao() {
+            const usuarios = await getAllData('usuarios');
+            if (usuarios.length === 0) {
+                const usuarioPadrao = {
+                    usuario: 'admin',
+                    senhaHash: gerarHashSHA256('admin123'),
+                    isAdmin: true,
+                    guias: ['servicos', 'receber', 'veiculo', 'relatorios', 'dashboard', 'usuarios']
+                };
+                await putData('usuarios', usuarioPadrao);
+            }
+        }
+
+        async function autenticarUsuario(e) {
+            e.preventDefault();
+            const user = document.getElementById('login-usuario').value.trim();
+            const pass = document.getElementById('login-senha').value;
+            const passHash = gerarHashSHA256(pass);
+
+            const tx = db.transaction('usuarios', 'readonly');
+            const store = tx.objectStore('usuarios');
+            const request = store.get(user);
+
+            request.onsuccess = async () => {
+                const usuarioEncontrado = request.result;
+                if (usuarioEncontrado && usuarioEncontrado.senhaHash === passHash) {
+                    sessionStorage.setItem('usuarioAutenticado', user);
+                    document.getElementById('modal-login').classList.add('hidden');
+                    document.getElementById('form-login').reset();
+                    document.getElementById('login-erro').classList.add('hidden');
+                    await verificarAutenticacao();
+                } else {
+                    document.getElementById('login-erro').classList.remove('hidden');
+                }
+            };
+        }
+
+        async function verificarAutenticacao() {
+            const aut = sessionStorage.getItem('usuarioAutenticado');
+            if (!aut) {
+                document.getElementById('modal-login').classList.remove('hidden');
+            } else {
+                const tx = db.transaction('usuarios', 'readonly');
+                const store = tx.objectStore('usuarios');
+                const request = store.get(aut);
+                request.onsuccess = () => {
+                    usuarioAtualObjeto = request.result;
+                    if (!usuarioAtualObjeto) {
+                        fazerLogout();
+                        return;
+                    }
+                    document.getElementById('modal-login').classList.add('hidden');
+                    document.getElementById('usuario-logado-info').innerText = `Logado: ${usuarioAtualObjeto.usuario} ${usuarioAtualObjeto.isAdmin ? '(Admin)' : ''}`;
+                    atualizarVisibilidadeNav();
+                };
+            }
+        }
+
+        function atualizarVisibilidadeNav() {
+            if (!usuarioAtualObjeto) return;
+            const guiasDisponiveis = ['servicos', 'receber', 'veiculo', 'relatorios', 'dashboard', 'usuarios'];
+            
+            guiasDisponiveis.forEach(g => {
+                const btn = document.getElementById(`btn-nav-${g}`);
+                if (btn) {
+                    if (usuarioAtualObjeto.isAdmin || (usuarioAtualObjeto.guias && usuarioAtualObjeto.guias.includes(g))) {
+                        btn.classList.remove('hidden');
+                    } else {
+                        btn.classList.add('hidden');
+                    }
+                }
+            });
+
+            const primeiraGuiaDisponivel = guiasDisponiveis.find(g => usuarioAtualObjeto.isAdmin || (usuarioAtualObjeto.guias && usuarioAtualObjeto.guias.includes(g)));
+            if (primeiraGuiaDisponivel) {
+                switchTab(primeiraGuiaDisponivel);
+            }
+        }
+
+        function fazerLogout() {
+            sessionStorage.removeItem('usuarioAutenticado');
+            usuarioAtualObjeto = null;
+            verificarAutenticacao();
+        }
+
+        function limparFiltrosRelatorio() {
+            document.getElementById('relatorio-data-inicio').value = '';
+            document.getElementById('relatorio-data-fim').value = '';
+            document.getElementById('relatorio-busca').value = '';
+        }
+
+        async function exportarDados(tipo, formato) {
+            const inicio = document.getElementById('relatorio-data-inicio').value;
+            const fim = document.getElementById('relatorio-data-fim').value;
+            const busca = document.getElementById('relatorio-busca').value.toLowerCase().trim();
+
+            let dados = [];
+            let nomeArquivo = `Relatorio_${tipo}_${new Date().toISOString().split('T')[0]}`;
+
+            if (tipo === 'servicos') {
+                const lista = await getAllData('servicos');
+                dados = lista.filter(s => {
+                    const cDataInicio = inicio ? s.dataServico >= inicio : true;
+                    const cDataFim = fim ? s.dataServico <= fim : true;
+                    const cBusca = (s.cidade || '').toLowerCase().includes(busca) ||
+                                   (s.regiao || '').toLowerCase().includes(busca) ||
+                                   (s.notaFiscal || '').toLowerCase().includes(busca) ||
+                                   (s.romaneio || '').toLowerCase().includes(busca);
+                    return cDataInicio && cDataFim && cBusca;
+                }).map(s => ({
+                    Data: formatarDataBR(s.dataServico),
+                    Romaneio: s.romaneio || '',
+                    NotaFiscal: s.notaFiscal || '',
+                    Cidade: s.cidade || '',
+                    Regiao: s.regiao || '',
+                    Peso_KG: s.peso || 0,
+                    Volumes: s.volumes || 0,
+                    VLR_Mercadoria: s.vlrMercadoria || 0,
+                    Frete_Transp: s.freteTransp || 0,
+                    Valor_Cobrado: s.valorCobrado || 0,
+                    Vencimento: formatarDataBR(s.vencimento),
+                    Data_Recebido: s.dataRecebido ? formatarDataBR(s.dataRecebido) : 'Pendente',
+                    Pedagio: s.vlrPedagio || 0,
+                    Combustivel: s.vlrCombustivel || 0,
+                    Litros_Abastecidos: s.litrosAbast || 0,
+                    KM_Inicial: s.kmInicial || 0,
+                    KM_Final: s.kmFinal || 0,
+                    OC_Coletas: s.ocColetas || '',
+                    Adicional: s.adicional || 0
+                }));
+            } else if (tipo === 'receber') {
+                const lista = await getAllData('servicos');
+                const hoje = new Date().toISOString().split('T')[0];
+                dados = lista.filter(s => {
+                    const cDataInicio = inicio ? s.dataServico >= inicio : true;
+                    const cDataFim = fim ? s.dataServico <= fim : true;
+                    const cBusca = (s.cidade || '').toLowerCase().includes(busca) ||
+                                   (s.regiao || '').toLowerCase().includes(busca) ||
+                                   (s.notaFiscal || '').toLowerCase().includes(busca) ||
+                                   (s.romaneio || '').toLowerCase().includes(busca);
+                    return cDataInicio && cDataFim && cBusca;
+                }).map(s => {
+                    let status = 'Pendente';
+                    if (s.dataRecebido) status = 'Recebido';
+                    else if (s.vencimento < hoje) status = 'Vencido';
+
+                    return {
+                        Status: status,
+                        Data_Servico: formatarDataBR(s.dataServico),
+                        Cidade: s.cidade || '',
+                        Regiao: s.regiao || '',
+                        NF_Romaneio: `NF: ${s.notaFiscal || ''} / Rom: ${s.romaneio || ''}`,
+                        Vencimento: formatarDataBR(s.vencimento),
+                        Valor: s.valorCobrado || 0,
+                        Adicional: s.adicional || 0,
+                        SubTotal: (s.valorCobrado || 0) + (s.adicional || 0),
+                        Data_Pagamento: s.dataRecebido ? formatarDataBR(s.dataRecebido) : '-'
+                    };
+                });
+            } else if (tipo === 'manutencoes') {
+                const lista = await getAllData('manutencoes');
+                dados = lista.filter(m => {
+                    const cDataInicio = inicio ? m.data >= inicio : true;
+                    const cDataFim = fim ? m.data <= fim : true;
+                    const cBusca = (m.peca || '').toLowerCase().includes(busca) ||
+                                   (m.orcamentoNo || '').toLowerCase().includes(busca) ||
+                                   (m.categoria || '').toLowerCase().includes(busca);
+                    return cDataInicio && cDataFim && cBusca;
+                }).map(m => ({
+                    Orcamento_No: m.orcamentoNo || '',
+                    Data: formatarDataBR(m.data),
+                    Categoria: m.categoria || 'Sem Categoria',
+                    Peca_Trocada: m.peca || '',
+                    Valor: m.valor || 0,
+                    Garantia: formatarDataBR(m.garantia)
+                }));
+            }
+
+            if (dados.length === 0) {
+                alert("Nenhum dado encontrado para exportação com os filtros aplicados.");
+                return;
+            }
+
+            const worksheet = XLSX.utils.json_to_sheet(dados);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, tipo);
+
+            if (formato === 'xlsx') {
+                XLSX.writeFile(workbook, `${nomeArquivo}.xlsx`);
+            } else if (formato === 'csv') {
+                XLSX.writeFile(workbook, `${nomeArquivo}.csv`, { bookType: 'csv' });
+            }
+        }
+
+        function isMobile() {
+            return window.matchMedia('(max-width: 767px)').matches;
+        }
+
+        function toggleSidebar() {
+            if (isMobile()) {
+                document.body.classList.toggle('sidebar-open');
+            } else {
+                document.body.classList.toggle('sidebar-collapsed');
+            }
+        }
+
+        function fecharSidebarMobile() {
+            document.body.classList.remove('sidebar-open');
+        }
+
+        window.addEventListener('resize', function () {
+            if (!isMobile()) document.body.classList.remove('sidebar-open');
+        });
+
+        function toggleColumnMenu(menuId) {
+            const menu = document.getElementById(menuId);
+            menu.classList.toggle('hidden');
+        }
+
+        function initColumnPicker(tableId, menuId) {
+            const table = document.getElementById(tableId);
+            const menu = document.getElementById(menuId);
+            if (!table || !menu) return;
+
+            const headers = table.querySelectorAll('thead th');
+            
+            if (Object.keys(columnStates[tableId]).length === 0) {
+                headers.forEach((_, idx) => {
+                    columnStates[tableId][idx] = true;
+                });
+            }
+
+            menu.innerHTML = '';
+
+            headers.forEach((th, index) => {
+                const labelText = th.innerText.trim();
+                if (!labelText) return;
+
+                const wrapper = document.createElement('label');
+                wrapper.className = 'flex items-center space-x-2 py-1 cursor-pointer hover:bg-gray-100 rounded px-1';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = columnStates[tableId][index] !== false;
+                checkbox.className = 'rounded text-blue-600';
+
+                checkbox.addEventListener('change', () => {
+                    columnStates[tableId][index] = checkbox.checked;
+                    applyColumnVisibility(tableId);
+                });
+
+                wrapper.appendChild(checkbox);
+                wrapper.appendChild(document.createTextNode(labelText));
+                menu.appendChild(wrapper);
+            });
+
+            applyColumnVisibility(tableId);
+        }
+
+        function applyColumnVisibility(tableId) {
+            const table = document.getElementById(tableId);
+            if (!table) return;
+
+            const states = columnStates[tableId] || {};
+            Object.keys(states).forEach(index => {
+                const isVisible = states[index];
+                const displayStyle = isVisible ? '' : 'none';
+                table.querySelectorAll(`.col-${index}`).forEach(cell => {
+                    cell.style.display = displayStyle;
+                });
+            });
+        }
+
+        function abrirModalServico() { document.getElementById('modal-servico').classList.remove('hidden'); }
+        function fecharModalServico() { document.getElementById('modal-servico').classList.add('hidden'); limparFormularioServico(); }
+        async function abrirModalManutencao() { 
+            await carregarOpcoesCategorias();
+            document.getElementById('modal-manutencao').classList.remove('hidden'); 
+        }
+        function fecharModalManutencao() { document.getElementById('modal-manutencao').classList.add('hidden'); document.getElementById('form-manutencao').reset(); }
+        
+        async function abrirModalCategorias() {
+            document.getElementById('modal-categorias').classList.remove('hidden');
+            await renderizarListaCategorias();
+        }
+        function fecharModalCategorias() { document.getElementById('modal-categorias').classList.add('hidden'); }
+
+        function switchTab(tabId, event) {
+            if (usuarioAtualObjeto && !usuarioAtualObjeto.isAdmin && (!usuarioAtualObjeto.guias || !usuarioAtualObjeto.guias.includes(tabId))) {
+                alert("Você não possui acesso a esta área!");
+                return;
+            }
+
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.sidebar-btn').forEach(el => el.classList.remove('active'));
+            
+            const targetSection = document.getElementById(`tab-${tabId}`);
+            if (targetSection) targetSection.classList.remove('hidden');
+            
+            let btn = null;
+            if (event && event.currentTarget) {
+                btn = event.currentTarget;
+            } else {
+                btn = document.getElementById(`btn-nav-${tabId}`);
+            }
+            if (btn) btn.classList.add('active');
+
+            const tituloMobile = document.getElementById('mobile-title');
+            if (tituloMobile && btn) {
+                const rotulo = btn.querySelector('.nav-text');
+                if (rotulo) tituloMobile.textContent = rotulo.textContent.trim();
+            }
+            fecharSidebarMobile();
+
+            if(tabId === 'servicos') renderizarServicos();
+            if(tabId === 'receber') renderizarReceber();
+            if(tabId === 'veiculo') renderizarVeiculo();
+            if(tabId === 'dashboard') renderizarDashboard();
+            if(tabId === 'usuarios') renderizarUsuarios();
+            
+            lucide.createIcons();
+        }
+
+        async function salvarServico(e) {
+            e.preventDefault();
+            const id = document.getElementById('edit-id').value;
+            
+            const novoServico = {
+                id: id ? parseInt(id) : Date.now(),
+                dataServico: document.getElementById('dataServico').value,
+                romaneio: document.getElementById('romaneio').value,
+                notaFiscal: document.getElementById('notaFiscal').value,
+                peso: parseFloat(document.getElementById('peso').value) || 0,
+                volumes: parseInt(document.getElementById('volumes').value) || 0,
+                vlrMercadoria: parseFloat(document.getElementById('vlrMercadoria').value) || 0,
+                freteTransp: parseFloat(document.getElementById('freteTransp').value) || 0,
+                cidade: document.getElementById('cidade').value,
+                regiao: document.getElementById('regiao').value,
+                valorCobrado: parseFloat(document.getElementById('valorCobrado').value) || 0,
+                vencimento: document.getElementById('vencimento').value,
+                dataRecebido: document.getElementById('dataRecebido').value || null,
+                vlrPedagio: parseFloat(document.getElementById('vlrPedagio').value) || 0,
+                vlrCombustivel: parseFloat(document.getElementById('vlrCombustivel').value) || 0,
+                litrosAbast: parseFloat(document.getElementById('litrosAbast').value) || 0,
+                kmInicial: parseInt(document.getElementById('kmInicial').value) || 0,
+                kmFinal: parseInt(document.getElementById('kmFinal').value) || 0,
+                ocColetas: document.getElementById('ocColetas').value,
+                adicional: parseFloat(document.getElementById('adicional').value) || 0,
+            };
+
+            await putData('servicos', novoServico);
+            fecharModalServico();
+            renderizarServicos();
+        }
+
+        async function renderizarServicos() {
+            const tbody = document.getElementById('tabela-servicos');
+            
+            let servicos = await getAllData('servicos');
+
+            const busca = document.getElementById('filtro-servico-busca').value.toLowerCase();
+            const dataInicio = document.getElementById('filtro-servico-data-inicio').value;
+            const dataFim = document.getElementById('filtro-servico-data-fim').value;
+
+            servicos = servicos.filter(s => {
+                const combinaBusca = (s.cidade || '').toLowerCase().includes(busca) ||
+                                     (s.regiao || '').toLowerCase().includes(busca) ||
+                                     (s.notaFiscal || '').toLowerCase().includes(busca) ||
+                                     (s.romaneio || '').toLowerCase().includes(busca);
+                const combinaDataInicio = dataInicio ? s.dataServico >= dataInicio : true;
+                const combinaDataFim = dataFim ? s.dataServico <= dataFim : true;
+
+                return combinaBusca && combinaDataInicio && combinaDataFim;
+            });
+
+            let htmlContent = '';
+            servicos.sort((a,b) => new Date(b.dataServico) - new Date(a.dataServico)).forEach(s => {
+                const kmRodado = (s.kmFinal && s.kmInicial) ? (s.kmFinal - s.kmInicial) : 0;
+                htmlContent += `
+                    <tr class="border-b hover:bg-gray-50 transition-colors">
+                        <td class="p-2.5 border col-0">${formatarDataBR(s.dataServico)}</td>
+                        <td class="p-2.5 border col-1">${s.romaneio || ''}</td>
+                        <td class="p-2.5 border col-2">${s.notaFiscal || ''}</td>
+                        <td class="p-2.5 border col-3">${s.cidade || ''}</td>
+                        <td class="p-2.5 border col-4">${s.regiao || ''}</td>
+                        <td class="p-2.5 border col-5">${s.peso || 0}</td>
+                        <td class="p-2.5 border col-6">${s.volumes || 0}</td>
+                        <td class="p-2.5 border col-7">R$ ${formatarMoedaBR(s.vlrMercadoria)}</td>
+                        <td class="p-2.5 border font-semibold text-purple-700 col-8">R$ ${formatarMoedaBR(s.freteTransp)}</td>
+                        <td class="p-2.5 border font-bold col-9">R$ ${(s.valorCobrado || 0).toFixed(2)}</td>
+                        <td class="p-2.5 border col-10">${formatarDataBR(s.vencimento)}</td>
+                        <td class="p-2.5 border col-11">${s.dataRecebido ? formatarDataBR(s.dataRecebido) : '<span class="text-red-500 font-semibold">Pendente</span>'}</td>
+                        <td class="p-2.5 border col-12">R$ ${(s.vlrPedagio || 0).toFixed(2)}</td>
+                        <td class="p-2.5 border col-13">R$ ${(s.vlrCombustivel || 0).toFixed(2)}</td>
+                        <td class="p-2.5 border col-14">${(s.litrosAbast || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L</td>
+                        <td class="p-2.5 border col-15">${s.kmInicial || 0}</td>
+                        <td class="p-2.5 border col-16">${s.kmFinal || 0}</td>
+                        <td class="p-2.5 border col-17">${kmRodado} KM</td>
+                        <td class="p-2.5 border col-18">${s.ocColetas || ''}</td>
+                        <td class="p-2.5 border col-19">R$ ${(s.adicional || 0).toFixed(2)}</td>
+                        <td class="p-2.5 border text-center col-20">
+                            <div class="flex items-center justify-center space-x-2">
+                                <button onclick="editarServico(${s.id})" class="text-blue-600 hover:text-blue-800 p-1" title="Editar">
+                                    <i data-lucide="pencil" class="w-4 h-4"></i>
+                                </button>
+                                <button onclick="excluirServico(${s.id})" class="text-red-600 hover:text-red-800 p-1" title="Excluir">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = htmlContent;
+
+            initColumnPicker('tabela-servicos-main', 'col-menu-servicos');
+            lucide.createIcons();
+        }
+
+        function limparFiltrosServicos() {
+            document.getElementById('filtro-servico-busca').value = '';
+            limparDatasGlobais();
+        }
+
+        async function editarServico(id) {
+            const servicos = await getAllData('servicos');
+            const s = servicos.find(item => item.id === id);
+            if (!s) return;
+            document.getElementById('edit-id').value = s.id;
+            document.getElementById('dataServico').value = s.dataServico;
+            document.getElementById('romaneio').value = s.romaneio;
+            document.getElementById('notaFiscal').value = s.notaFiscal;
+            document.getElementById('peso').value = s.peso;
+            document.getElementById('volumes').value = s.volumes;
+            document.getElementById('vlrMercadoria').value = s.vlrMercadoria;
+            document.getElementById('freteTransp').value = s.freteTransp || 0;
+            document.getElementById('cidade').value = s.cidade;
+            document.getElementById('regiao').value = s.regiao;
+            document.getElementById('valorCobrado').value = s.valorCobrado;
+            document.getElementById('vencimento').value = s.vencimento;
+            document.getElementById('dataRecebido').value = s.dataRecebido || '';
+            document.getElementById('vlrPedagio').value = s.vlrPedagio;
+            document.getElementById('vlrCombustivel').value = s.vlrCombustivel;
+            document.getElementById('litrosAbast').value = s.litrosAbast || 0;
+            document.getElementById('kmInicial').value = s.kmInicial;
+            document.getElementById('kmFinal').value = s.kmFinal;
+            document.getElementById('ocColetas').value = s.ocColetas;
+            document.getElementById('adicional').value = s.adicional;
+            document.getElementById('form-servico-title').innerText = "Editar Lançamento";
+            abrirModalServico();
+        }
+
+        async function excluirServico(id) {
+            if (confirm("Tem certeza que deseja excluir este serviço?")) {
+                await deleteData('servicos', id);
+                renderizarServicos();
+            }
+        }
+
+        function limparFormularioServico() {
+            document.getElementById('form-servico').reset();
+            document.getElementById('edit-id').value = '';
+            document.getElementById('form-servico-title').innerText = "Novo Lançamento";
+        }
+
+        async function renderizarReceber() {
+            const tbody = document.getElementById('tabela-receber');
+            tbody.innerHTML = '';
+            
+            let servicos = await getAllData('servicos');
+            const statusSelecionados = Array.from(document.querySelectorAll('.chk-receber-status:checked')).map(c => c.value);
+            const dataInicio = document.getElementById('filtro-receber-data-inicio').value;
+            const dataFim = document.getElementById('filtro-receber-data-fim').value;
+            const busca = document.getElementById('filtro-receber-busca').value.toLowerCase();
+            const hoje = new Date().toISOString().split('T')[0];
+
+            let sumRecebido = 0;
+            let sumPendente = 0;
+            let sumVencido = 0;
+
+            servicos.forEach(s => {
+                const valor = s.valorCobrado || 0;
+                const adicional = s.adicional || 0;
+                const subtotal = valor + adicional;
+
+                let status = 'pendente';
+                let classeCor = 'pendente';
+                
+                if (s.dataRecebido) {
+                    status = 'recebido';
+                    classeCor = 'recebido';
+                } else if (s.vencimento < hoje) {
+                    status = 'vencido';
+                    classeCor = 'vencido';
+                }
+
+                const combinaStatus = statusSelecionados.length === 0 || statusSelecionados.includes(status);
+                const combinaDataInicio = dataInicio ? s.dataServico >= dataInicio : true;
+                const combinaDataFim = dataFim ? s.dataServico <= dataFim : true;
+                const combinaBusca = (s.cidade || '').toLowerCase().includes(busca) ||
+                                     (s.regiao || '').toLowerCase().includes(busca) ||
+                                     (s.notaFiscal || '').toLowerCase().includes(busca) ||
+                                     (s.romaneio || '').toLowerCase().includes(busca);
+
+                if (!combinaStatus || !combinaDataInicio || !combinaDataFim || !combinaBusca) return;
+
+                if (status === 'recebido') {
+                    sumRecebido += subtotal;
+                } else if (status === 'vencido') {
+                    sumVencido += subtotal;
+                } else {
+                    sumPendente += subtotal;
+                }
+
+                const textoBaixaStatus = s.dataRecebido 
+                    ? `Pago em ${formatarDataBR(s.dataRecebido)}` 
+                    : `<button onclick="darBaixa(${s.id})" class="bg-green-600 hover:bg-green-700 text-white px-2.5 py-1 rounded-md text-xs font-bold inline-flex items-center gap-1">
+                        <i data-lucide="check-circle" class="w-3.5 h-3.5"></i> Dar Baixa
+                       </button>`;
+
+                tbody.innerHTML += `
+                    <tr class="border-b ${classeCor}">
+                        <td class="p-3 border font-bold uppercase col-0">${status}</td>
+                        <td class="p-3 border col-1">${formatarDataBR(s.dataServico)}</td>
+                        <td class="p-3 border col-2">${s.cidade || ''}</td>
+                        <td class="p-3 border col-3">${s.regiao || ''}</td>
+                        <td class="p-3 border col-4">NF: ${s.notaFiscal || ''} / Rom: ${s.romaneio || ''}</td>
+                        <td class="p-3 border col-5">${formatarDataBR(s.vencimento)}</td>
+                        <td class="p-3 border font-bold col-6">R$ ${valor.toFixed(2)}</td>
+                        <td class="p-3 border col-7">R$ ${adicional.toFixed(2)}</td>
+                        <td class="p-3 border font-bold text-blue-800 col-8">R$ ${subtotal.toFixed(2)}</td>
+                        <td class="p-3 border col-9">${textoBaixaStatus}</td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('card-rec-recebido').innerText = `R$ ${sumRecebido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            document.getElementById('card-rec-pendente').innerText = `R$ ${sumPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            document.getElementById('card-rec-vencido').innerText = `R$ ${sumVencido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            document.getElementById('card-rec-total').innerText = `R$ ${(sumRecebido + sumPendente + sumVencido).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+            initColumnPicker('tabela-receber-main', 'col-menu-receber');
+            lucide.createIcons();
+        }
+
+        function limparFiltrosReceber() {
+            document.querySelectorAll('.chk-receber-status').forEach(c => c.checked = false);
+            document.getElementById('filtro-receber-busca').value = '';
+            limparDatasGlobais();
+        }
+
+        async function darBaixa(id) {
+            const hoje = new Date();
+            const diaPadrao = String(hoje.getDate()).padStart(2, '0');
+            const mesPadrao = String(hoje.getMonth() + 1).padStart(2, '0');
+            const anoPadrao = hoje.getFullYear();
+            const dataHojeBR = `${diaPadrao}/${mesPadrao}/${anoPadrao}`;
+
+            const dataEntradaBR = prompt("Informe a data do pagamento (DD/MM/AAAA):", dataHojeBR);
+            
+            if (dataEntradaBR === null) return;
+            
+            const partes = dataEntradaBR.trim().split('/');
+            if (partes.length !== 3 || partes[0].length !== 2 || partes[1].length !== 2 || partes[2].length !== 4) {
+                alert("Data de pagamento inválida. Utilize o formato DD/MM/AAAA.");
+                return;
+            }
+
+            const dataISO = `${partes[2]}-${partes[1]}-${partes[0]}`;
+
+            const servicos = await getAllData('servicos');
+            const s = servicos.find(item => item.id === id);
+            if (s) {
+                s.dataRecebido = dataISO;
+                await putData('servicos', s);
+                renderizarReceber();
+            }
+        }
+
+        async function salvarCategoria(e) {
+            e.preventDefault();
+            const input = document.getElementById('nomeCategoria');
+            const nome = input.value.trim();
+            if (nome) {
+                await putData('categorias', { id: Date.now(), nome });
+                input.value = '';
+                await renderizarListaCategorias();
+                await carregarOpcoesCategorias();
+                renderizarVeiculo();
+            }
+        }
+
+        async function renderizarListaCategorias() {
+            const ul = document.getElementById('lista-categorias');
+            ul.innerHTML = '';
+            const categorias = await getAllData('categorias');
+            categorias.forEach(c => {
+                ul.innerHTML += `
+                    <li class="flex justify-between items-center py-2 border-b">
+                        <span>${c.nome}</span>
+                        <button onclick="excluirCategoria(${c.id})" class="text-red-600 hover:text-red-800 p-1" title="Excluir">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                    </li>
+                `;
+            });
+            lucide.createIcons();
+        }
+
+        async function excluirCategoria(id) {
+            if (confirm("Deseja excluir esta categoria?")) {
+                await deleteData('categorias', id);
+                await renderizarListaCategorias();
+                await carregarOpcoesCategorias();
+                renderizarVeiculo();
+            }
+        }
+
+        async function carregarOpcoesCategorias() {
+            const categorias = await getAllData('categorias');
+            
+            const selectModal = document.getElementById('categoriaManutencao');
+            const valorAtualModal = selectModal.value;
+            selectModal.innerHTML = '<option value="">Sem Categoria</option>';
+            categorias.forEach(c => {
+                selectModal.innerHTML += `<option value="${c.nome}">${c.nome}</option>`;
+            });
+            selectModal.value = valorAtualModal;
+
+            const selectFiltro = document.getElementById('filtro-manutencao-categoria');
+            const valorAtualFiltro = selectFiltro.value || 'todas';
+            selectFiltro.innerHTML = '<option value="todas">Todas as Categorias</option>';
+            categorias.forEach(c => {
+                selectFiltro.innerHTML += `<option value="${c.nome}">${c.nome}</option>`;
+            });
+            selectFiltro.value = valorAtualFiltro;
+        }
+
+        async function salvarManutencao(e) {
+            e.preventDefault();
+            const novaManutencao = {
+                id: Date.now(),
+                orcamentoNo: document.getElementById('orcamentoNo').value,
+                data: document.getElementById('dataManutencao').value,
+                categoria: document.getElementById('categoriaManutencao').value,
+                valor: parseFloat(document.getElementById('vlrManutencao').value) || 0,
+                peca: document.getElementById('pecaTrocada').value,
+                garantia: document.getElementById('dataGarantia').value
+            };
+            await putData('manutencoes', novaManutencao);
+            fecharModalManutencao();
+            renderizarVeiculo();
+        }
+
+        function formatarMoedaBR(v) {
+            return (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        async function renderizarVeiculo() {
+            const servicos = await getAllData('servicos');
+            let manutençoes = await getAllData('manutencoes');
+
+            const busca = document.getElementById('filtro-manutencao-busca').value.toLowerCase();
+            const categoriaSel = document.getElementById('filtro-manutencao-categoria').value;
+            const dataInicio = document.getElementById('filtro-manutencao-data-inicio').value;
+            const dataFim = document.getElementById('filtro-manutencao-data-fim').value;
+
+            const manutencoesFiltradas = manutençoes.filter(m => {
+                const combinaBusca = (m.peca || '').toLowerCase().includes(busca) || 
+                                     (m.orcamentoNo || '').toLowerCase().includes(busca);
+                const combinaCategoria = categoriaSel === 'todas' || m.categoria === categoriaSel;
+                const combinaDataInicio = dataInicio ? m.data >= dataInicio : true;
+                const combinaDataFim = dataFim ? m.data <= dataFim : true;
+
+                return combinaBusca && combinaCategoria && combinaDataInicio && combinaDataFim;
+            });
+
+            let totalKm = 0;
+            let gastoCombustivel = 0;
+            let gastoPedagio = 0;
+
+            let litrosAbastecidos = 0;
+            // Cards seguem o mesmo filtro de data (guia Servicos Prestados)
+            const servicosFiltrados = servicos.filter(s => {
+                const combinaDataInicio = dataInicio ? s.dataServico >= dataInicio : true;
+                const combinaDataFim = dataFim ? s.dataServico <= dataFim : true;
+                return combinaDataInicio && combinaDataFim;
+            });
+            servicosFiltrados.forEach(s => {
+                if (s.kmFinal && s.kmInicial) totalKm += (s.kmFinal - s.kmInicial);
+                gastoCombustivel += (s.vlrCombustivel || 0);
+                gastoPedagio += (s.vlrPedagio || 0);
+                litrosAbastecidos += (s.litrosAbast || 0);
+            });
+
+            let gastoManutencoes = manutencoesFiltradas.reduce((acc, m) => acc + (m.valor || 0), 0);
+            let totalGasto = gastoCombustivel + gastoPedagio + gastoManutencoes;
+
+            const precoLitro = parseFloat(document.getElementById('precoLitro').value) || 1;
+            const totalLitros = litrosAbastecidos > 0 ? litrosAbastecidos : (gastoCombustivel / precoLitro);
+
+            const mediaCustoKm = totalKm > 0 ? (totalGasto / totalKm) : 0;
+            const mediaKmL = totalLitros > 0 ? (totalKm / totalLitros) : 0;
+
+            document.getElementById('totalGasto').innerText = `R$ ${formatarMoedaBR(totalGasto)}`;
+            document.getElementById('totalServicosManutencao').innerText = `R$ ${formatarMoedaBR(gastoManutencoes)}`;
+            document.getElementById('totalKm').innerText = `${totalKm.toFixed(1)} km`;
+            document.getElementById('mediaCustoKm').innerText = `R$ ${mediaCustoKm.toFixed(2)}`;
+            document.getElementById('mediaKmL').innerText = `${mediaKmL.toFixed(2)} Km/L`;
+            const elLitros = document.getElementById('totalLitrosAbast');
+            if (elLitros) elLitros.innerText = `${totalLitros.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L${litrosAbastecidos > 0 ? '' : ' (estimado)'}`;
+
+            const tbody = document.getElementById('tabela-manutencao');
+            tbody.innerHTML = '';
+            manutencoesFiltradas.forEach(m => {
+                tbody.innerHTML += `
+                    <tr class="border-b hover:bg-gray-50 transition-colors">
+                        <td class="p-3 border col-0">${m.orcamentoNo || ''}</td>
+                        <td class="p-3 border col-1">${formatarDataBR(m.data)}</td>
+                        <td class="p-3 border col-2"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-semibold">${m.categoria || 'Sem Cat.'}</span></td>
+                        <td class="p-3 border col-3">${m.peca || ''}</td>
+                        <td class="p-3 border font-bold col-4">R$ ${(m.valor || 0).toFixed(2)}</td>
+                        <td class="p-3 border col-5">${formatarDataBR(m.garantia)}</td>
+                        <td class="p-3 border text-center col-6">
+                            <button onclick="excluirManutencao(${m.id})" class="text-red-600 hover:text-red-800 p-1" title="Excluir">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            initColumnPicker('tabela-manutencao-main', 'col-menu-manutencao');
+            lucide.createIcons();
+        }
+
+        function limparFiltrosManutencao() {
+            document.getElementById('filtro-manutencao-busca').value = '';
+            document.getElementById('filtro-manutencao-categoria').value = 'todas';
+            limparDatasGlobais();
+        }
+
+        async function excluirManutencao(id) {
+            if(confirm("Excluir esta manutenção?")) {
+                await deleteData('manutencoes', id);
+                renderizarVeiculo();
+            }
+        }
+
+        function limparFiltrosDashboard() {
+            document.getElementById('filtro-dash-status').value = 'todos';
+            document.getElementById('filtro-dash-regiao').value = '';
+            limparDatasGlobais();
+        }
+
+
+        // ===== Filtro de data GLOBAL (compartilhado entre todas as guias) =====
+        const DATE_FILTER_INPUTS = {
+            inicio: ['filtro-servico-data-inicio', 'filtro-receber-data-inicio', 'filtro-manutencao-data-inicio', 'filtro-dash-inicio'],
+            fim: ['filtro-servico-data-fim', 'filtro-receber-data-fim', 'filtro-manutencao-data-fim', 'filtro-dash-fim']
+        };
+
+        function renderizarTodasGuias() {
+            if (typeof renderizarServicos === 'function') renderizarServicos();
+            if (typeof renderizarReceber === 'function') renderizarReceber();
+            if (typeof renderizarVeiculo === 'function') renderizarVeiculo();
+            if (typeof renderizarDashboard === 'function') renderizarDashboard();
+        }
+
+        function aplicarDatasGlobais(inicio, fim, render = true) {
+            DATE_FILTER_INPUTS.inicio.forEach(id => { const el = document.getElementById(id); if (el) el.value = inicio || ''; });
+            DATE_FILTER_INPUTS.fim.forEach(id => { const el = document.getElementById(id); if (el) el.value = fim || ''; });
+            try { localStorage.setItem('filtroDataGlobal', JSON.stringify({ inicio: inicio || '', fim: fim || '' })); } catch (e) {}
+            if (render) renderizarTodasGuias();
+        }
+
+        function aplicarDataGlobal(campo, valor) {
+            const iniEl = document.getElementById('filtro-dash-inicio');
+            const fimEl = document.getElementById('filtro-dash-fim');
+            const inicio = campo === 'inicio' ? valor : (iniEl ? iniEl.value : '');
+            const fim = campo === 'fim' ? valor : (fimEl ? fimEl.value : '');
+            aplicarDatasGlobais(inicio, fim);
+        }
+
+        function limparDatasGlobais() {
+            aplicarDatasGlobais('', '');
+        }
+
+        function restaurarDatasGlobais() {
+            let salvo = null;
+            try { salvo = JSON.parse(localStorage.getItem('filtroDataGlobal') || 'null'); } catch (e) {}
+            if (salvo && (salvo.inicio || salvo.fim)) aplicarDatasGlobais(salvo.inicio, salvo.fim, false);
+        }
+
+        document.addEventListener('DOMContentLoaded', restaurarDatasGlobais);
+
+        function ultimoDiaMes(iso) {
+            const [a, m] = iso.split('-').map(Number);
+            return `${iso}-${String(new Date(a, m, 0).getDate()).padStart(2, '0')}`;
+        }
+
+        function filtrarDashboardPorMes(mesISO) {
+            const ini = document.getElementById('filtro-dash-inicio');
+            const fim = document.getElementById('filtro-dash-fim');
+            const inicioMes = `${mesISO}-01`;
+            if (ini.value === inicioMes) { aplicarDatasGlobais('', ''); }
+            else { aplicarDatasGlobais(inicioMes, ultimoDiaMes(mesISO)); }
+        }
+
+        function filtrarDashboardPorStatus(status) {
+            const sel = document.getElementById('filtro-dash-status');
+            sel.value = (sel.value === status) ? 'todos' : status;
+            renderizarDashboard();
+        }
+
+        async function renderizarDashboard() {
+            let servicos = await getAllData('servicos');
+            let manutençoes = await getAllData('manutencoes');
+
+            const statusFiltro = document.getElementById('filtro-dash-status').value;
+            const dataInicio = document.getElementById('filtro-dash-inicio').value;
+            const dataFim = document.getElementById('filtro-dash-fim').value;
+            const regiaoTexto = document.getElementById('filtro-dash-regiao').value.trim().toLowerCase();
+            const hoje = new Date().toISOString().split('T')[0];
+
+            servicos = servicos.filter(s => {
+                let st = 'pendente';
+                if (s.dataRecebido) st = 'recebido';
+                else if (s.vencimento && s.vencimento < hoje) st = 'vencido';
+
+                const combinaStatus = statusFiltro === 'todos' || st === statusFiltro;
+                const combinaDataInicio = dataInicio ? s.dataServico >= dataInicio : true;
+                const combinaDataFim = dataFim ? s.dataServico <= dataFim : true;
+                const combinaRegiao = regiaoTexto === '' || (s.regiao && s.regiao.toLowerCase().includes(regiaoTexto));
+                return combinaStatus && combinaDataInicio && combinaDataFim && combinaRegiao;
+            });
+
+            manutençoes = manutençoes.filter(m => {
+                const combinaDataInicio = dataInicio ? m.data >= dataInicio : true;
+                const combinaDataFim = dataFim ? m.data <= dataFim : true;
+                return combinaDataInicio && combinaDataFim;
+            });
+
+            let totalPeso = 0;
+            let totalVolumes = 0;
+            let totalFrete = 0;
+            let totalRecebido = 0;
+            let totalPendente = 0;
+            let totalVencido = 0;
+
+            servicos.forEach(s => {
+                totalPeso += (s.peso || 0);
+                totalVolumes += (s.volumes || 0);
+                totalFrete += (s.freteTransp || 0);
+
+                const vlr = s.valorCobrado || 0;
+                if (s.dataRecebido) {
+                    totalRecebido += vlr;
+                } else if (s.vencimento && s.vencimento < hoje) {
+                    totalVencido += vlr;
+                } else {
+                    totalPendente += vlr;
+                }
+            });
+
+            document.getElementById('card-total-peso').innerText = `${totalPeso.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} kg`;
+            document.getElementById('card-total-volumes').innerText = totalVolumes.toLocaleString('pt-BR');
+            document.getElementById('card-total-frete').innerText = `R$ ${totalFrete.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            
+            document.getElementById('card-total-recebido').innerText = `R$ ${totalRecebido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            document.getElementById('card-falta-receber').innerText = `(Pendentes: R$ ${totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Vencidos: R$ ${totalVencido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
+
+            const meses = {};
+            servicos.forEach(s => {
+                if (!s.dataServico) return;
+                const mes = s.dataServico.substring(0, 7);
+                if(!meses[mes]) meses[mes] = { ganhos: 0, despesas: 0, pesoTotal: 0, volumeTotal: 0, qtdServicos: 0 };
+                meses[mes].ganhos += (s.valorCobrado || 0);
+                meses[mes].despesas += ((s.vlrCombustivel || 0) + (s.vlrPedagio || 0));
+                meses[mes].pesoTotal += (s.peso || 0);
+                meses[mes].volumeTotal += (s.volumes || 0);
+                meses[mes].qtdServicos += 1;
+            });
+
+            manutençoes.forEach(m => {
+                if (!m.data) return;
+                const mes = m.data.substring(0, 7);
+                if(!meses[mes]) meses[mes] = { ganhos: 0, despesas: 0, pesoTotal: 0, volumeTotal: 0, qtdServicos: 0 };
+                meses[mes].despesas += (m.valor || 0);
+            });
+
+            const labelsMesesISO = Object.keys(meses).sort();
+            const labelsMesesBR = labelsMesesISO.map(m => formatarMesAnoBR(m));
+            
+            const dadosGanhos = labelsMesesISO.map(m => meses[m].ganhos);
+            const dadosDespesas = labelsMesesISO.map(m => meses[m].despesas);
+            const mediaPeso = labelsMesesISO.map(m => meses[m].qtdServicos > 0 ? (meses[m].pesoTotal / meses[m].qtdServicos) : 0);
+            const mediaVolumes = labelsMesesISO.map(m => meses[m].qtdServicos > 0 ? (meses[m].volumeTotal / meses[m].qtdServicos) : 0);
+
+            if (chartFinanceiroInstance) chartFinanceiroInstance.destroy();
+            if (chartStatusInstance) chartStatusInstance.destroy();
+            if (chartPesoVolumeInstance) chartPesoVolumeInstance.destroy();
+
+            const ctx1 = document.getElementById('chartFinanceiro').getContext('2d');
+            chartFinanceiroInstance = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: labelsMesesBR,
+                    datasets: [
+                        { label: 'Ganhos (R$)', data: dadosGanhos, backgroundColor: '#22c55e' },
+                        { label: 'Despesas (R$)', data: dadosDespesas, backgroundColor: '#ef4444' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+                    onClick: (e, els) => { if (els.length) filtrarDashboardPorMes(labelsMesesISO[els[0].index]); }
+                }
+            });
+
+            let recebidos = 0, pendentes = 0, vencidos = 0;
+            servicos.forEach(s => {
+                if (s.dataRecebido) recebidos++;
+                else if (s.vencimento && s.vencimento < hoje) vencidos++;
+                else pendentes++;
+            });
+
+            const ctx2 = document.getElementById('chartStatus').getContext('2d');
+            chartStatusInstance = new Chart(ctx2, {
+                type: 'pie',
+                data: {
+                    labels: ['Recebidos', 'Pendentes', 'Vencidos'],
+                    datasets: [{
+                        data: [recebidos, pendentes, vencidos],
+                        backgroundColor: ['#10b981', '#f59e0b', '#ef4444']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } },
+                    onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+                    onClick: (e, els) => {
+                        if (!els.length) return;
+                        filtrarDashboardPorStatus(['recebido', 'pendente', 'vencido'][els[0].index]);
+                    }
+                }
+            });
+
+            const ctx3 = document.getElementById('chartPesoVolume').getContext('2d');
+            chartPesoVolumeInstance = new Chart(ctx3, {
+                type: 'line',
+                data: {
+                    labels: labelsMesesBR,
+                    datasets: [
+                        { label: 'Média Peso (kg)', data: mediaPeso, borderColor: '#3b82f6', backgroundColor: '#3b82f6', fill: false, yAxisID: 'y' },
+                        { label: 'Média Volumes', data: mediaVolumes, borderColor: '#f97316', backgroundColor: '#f97316', fill: false, yAxisID: 'y1' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+                    onClick: (e, els) => { if (els.length) filtrarDashboardPorMes(labelsMesesISO[els[0].index]); },
+                    scales: {
+                        y: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Peso (kg)' } },
+                        y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Volumes' } }
+                    }
+                }
+            });
+            
+            lucide.createIcons();
+        }
+
+        async function renderizarUsuarios() {
+            const tbody = document.getElementById('tabela-usuarios');
+            tbody.innerHTML = '';
+            const usuarios = await getAllData('usuarios');
+
+            usuarios.forEach(u => {
+                const badgeAdmin = u.isAdmin 
+                    ? `<span class="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded font-bold">Administrador</span>` 
+                    : `<span class="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded font-semibold">Usuário Comum</span>`;
+
+                const guiasTexto = u.isAdmin ? 'Todas as guias' : (u.guias && u.guias.length > 0 ? u.guias.join(', ') : 'Nenhuma');
+
+                tbody.innerHTML += `
+                    <tr class="border-b hover:bg-gray-50 transition-colors">
+                        <td class="p-3 border font-bold">${u.usuario}</td>
+                        <td class="p-3 border">${badgeAdmin}</td>
+                        <td class="p-3 border text-xs">${guiasTexto}</td>
+                        <td class="p-3 border text-center">
+                            <div class="flex items-center justify-center space-x-2">
+                                <button onclick="editarUsuario('${u.usuario}')" class="text-blue-600 hover:text-blue-800 p-1" title="Editar">
+                                    <i data-lucide="pencil" class="w-4 h-4"></i>
+                                </button>
+                                <button onclick="excluirUsuario('${u.usuario}')" class="text-red-600 hover:text-red-800 p-1" title="Excluir">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+            lucide.createIcons();
+        }
+
+        function abrirModalUsuario() {
+            document.getElementById('form-usuario').reset();
+            document.getElementById('edit-usuario-original').value = '';
+            document.getElementById('usr-nome').disabled = false;
+            document.getElementById('form-usuario-title').innerText = "Novo Usuário";
+            toggleAdminCheckboxStatus();
+            document.getElementById('modal-usuario').classList.remove('hidden');
+        }
+
+        function fecharModalUsuario() {
+            document.getElementById('modal-usuario').classList.add('hidden');
+        }
+
+        function toggleAdminCheckboxStatus() {
+            const isAdmin = document.getElementById('usr-admin').checked;
+            const checkboxes = document.querySelectorAll('.chk-guia');
+            checkboxes.forEach(c => {
+                c.disabled = isAdmin;
+                if (isAdmin) c.checked = true;
+            });
+        }
+
+        async function editarUsuario(username) {
+            const usuarios = await getAllData('usuarios');
+            const u = usuarios.find(usr => usr.usuario === username);
+            if (!u) return;
+
+            document.getElementById('edit-usuario-original').value = u.usuario;
+            document.getElementById('usr-nome').value = u.usuario;
+            document.getElementById('usr-nome').disabled = true;
+            document.getElementById('usr-senha').value = '';
+            document.getElementById('usr-admin').checked = !!u.isAdmin;
+
+            const checkboxes = document.querySelectorAll('.chk-guia');
+            checkboxes.forEach(c => {
+                c.checked = u.isAdmin || (u.guias && u.guias.includes(c.value));
+            });
+
+            toggleAdminCheckboxStatus();
+            document.getElementById('form-usuario-title').innerText = "Editar Usuário";
+            document.getElementById('modal-usuario').classList.remove('hidden');
+        }
+
+        async function salvarUsuario(e) {
+            e.preventDefault();
+            const originalUser = document.getElementById('edit-usuario-original').value;
+            const username = document.getElementById('usr-nome').value.trim();
+            const senha = document.getElementById('usr-senha').value;
+            const isAdmin = document.getElementById('usr-admin').checked;
+
+            const guiasSelecionadas = [];
+            document.querySelectorAll('.chk-guia:checked').forEach(c => guiasSelecionadas.push(c.value));
+
+            if (!originalUser) {
+                const usuarios = await getAllData('usuarios');
+                if (usuarios.some(u => u.usuario === username)) {
+                    alert("Usuário já existente!");
+                    return;
+                }
+                if (!senha) {
+                    alert("Senha é obrigatória para um novo usuário!");
+                    return;
+                }
+            }
+
+            let senhaHashFinal = '';
+            if (originalUser) {
+                const usuarios = await getAllData('usuarios');
+                const uOriginal = usuarios.find(usr => usr.usuario === originalUser);
+                senhaHashFinal = senha ? gerarHashSHA256(senha) : uOriginal.senhaHash;
+            } else {
+                senhaHashFinal = gerarHashSHA256(senha);
+            }
+
+            const dadosUsuario = {
+                usuario: username,
+                senhaHash: senhaHashFinal,
+                isAdmin: isAdmin,
+                guias: isAdmin ? ['servicos', 'receber', 'veiculo', 'relatorios', 'dashboard', 'usuarios'] : guiasSelecionadas
+            };
+
+            await putData('usuarios', dadosUsuario);
+            fecharModalUsuario();
+            renderizarUsuarios();
+        }
+
+        async function excluirUsuario(username) {
+            if (username === 'admin') {
+                alert("O usuário administrador principal 'admin' não pode ser excluído.");
+                return;
+            }
+            if (usuarioAtualObjeto && usuarioAtualObjeto.usuario === username) {
+                alert("Você não pode excluir seu próprio usuário enquanto está logado.");
+                return;
+            }
+            if (confirm(`Deseja realmente excluir o usuário '${username}'?`)) {
+                await deleteData('usuarios', username);
+                renderizarUsuarios();
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            await initDB();
+            await inicializarUsuarioPadrao();
+            await verificarAutenticacao();
+            await carregarOpcoesCategorias();
+            renderizarServicos();
+            lucide.createIcons();
+        });
+    </script>
+</body>
+</html>
