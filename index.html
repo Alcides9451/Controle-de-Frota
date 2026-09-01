@@ -26,6 +26,20 @@
         tr.pendente { background-color: #fffbeb; }
         .sidebar-btn.active { background-color: #1e293b; border-left: 4px solid #3b82f6; }
 
+        /* Estilo para Telas Cheias de Gráfico */
+        .chart-fullscreen-modal {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 9999 !important;
+            background-color: #ffffff !important;
+            padding: 1.5rem !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+
         /* ===== RESPONSIVIDADE (Computador / Celular) ===== */
         #mobile-topbar { display: none; }
         #sidebar-overlay { display: none; }
@@ -168,7 +182,7 @@
             <div class="bg-white p-4 rounded-lg shadow mb-4 flex flex-wrap gap-3 items-end">
                 <div class="flex-1 min-w-[200px]">
                     <label class="block text-xs font-semibold text-gray-600">Buscar (Cidade, Região, NF, Romaneio)</label>
-                    <input type="text" id="filtro-servico-busca" oninput="renderizarServicos()" placeholder="Digite para filtrar..." class="w-full border rounded p-2 text-sm">
+                    <input type="text" id="filtro-servico-busca" oninput="agendarRenderizacao('servicos')" placeholder="Digite para filtrar..." class="w-full border rounded p-2 text-sm">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-600">Data Inicial</label>
@@ -256,7 +270,7 @@
                 </div>
                 <div class="flex-1 min-w-[150px]">
                     <label class="block text-xs font-semibold text-gray-600">Buscar</label>
-                    <input type="text" id="filtro-receber-busca" oninput="renderizarReceber()" placeholder="Cidade, Região, NF..." class="w-full border rounded p-2 text-sm">
+                    <input type="text" id="filtro-receber-busca" oninput="agendarRenderizacao('receber')" placeholder="Cidade, Região, NF..." class="w-full border rounded p-2 text-sm">
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-600">Data Inicial</label>
@@ -346,7 +360,7 @@
             <div class="bg-white p-4 rounded-lg shadow mb-4 flex flex-wrap gap-3 items-end">
                 <div class="flex-1 min-w-[150px]">
                     <label class="block text-xs font-semibold text-gray-600">Buscar (Peça, Orçamento)</label>
-                    <input type="text" id="filtro-manutencao-busca" oninput="renderizarVeiculo()" placeholder="Digite para filtrar..." class="w-full border rounded p-2 text-sm">
+                    <input type="text" id="filtro-manutencao-busca" oninput="agendarRenderizacao('veiculo')" placeholder="Digite para filtrar..." class="w-full border rounded p-2 text-sm">
                 </div>
                 <div class="relative">
                     <label class="block text-xs font-semibold text-gray-600">Categorias</label>
@@ -499,7 +513,17 @@
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-600">Região</label>
-                    <input type="text" id="filtro-dash-regiao" oninput="renderizarDashboard()" placeholder="Filtrar por região..." class="border rounded p-2 text-sm">
+                    <input type="text" id="filtro-dash-regiao" oninput="agendarRenderizacao('dashboard')" placeholder="Filtrar por região..." class="border rounded p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Qtd. Itens nos Gráficos</label>
+                    <select id="filtro-dash-limite" onchange="renderizarDashboard()" class="border rounded p-2 text-sm font-semibold text-blue-600">
+                        <option value="0">Todos</option>
+                        <option value="5">Últimos 5</option>
+                        <option value="10">Últimos 10</option>
+                        <option value="12" selected>Últimos 12</option>
+                        <option value="24">Últimos 24</option>
+                    </select>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-gray-600">Data Inicial</label>
@@ -535,18 +559,33 @@
 
             <!-- GRÁFICOS -->
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div class="bg-white p-4 rounded-lg shadow h-80">
-                    <h3 class="text-sm font-bold text-gray-700 mb-2">Ganhos vs Despesas por Mês <span class="text-xs font-normal text-gray-400">(clique para filtrar o mês)</span></h3>
-                    <div class="h-64"><canvas id="chartFinanceiro"></canvas></div>
+                <div id="container-chartFinanceiro" class="bg-white p-4 rounded-lg shadow h-96 flex flex-col justify-between">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-sm font-bold text-gray-700">Ganhos vs Despesas por Mês <span class="text-xs font-normal text-gray-400">(clique para filtrar)</span></h3>
+                        <button onclick="toggleExpandChart('container-chartFinanceiro')" class="p-1 text-gray-500 hover:text-blue-600 rounded bg-gray-100 hover:bg-gray-200" title="Expandir/Restaurar Tela Cheia">
+                            <i data-lucide="maximize-2" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                    <div class="flex-1 relative w-full h-full min-h-0"><canvas id="chartFinanceiro"></canvas></div>
                 </div>
-                <div class="bg-white p-4 rounded-lg shadow h-80">
-                    <h3 class="text-sm font-bold text-gray-700 mb-2">Status dos Recebimentos <span class="text-xs font-normal text-gray-400">(clique para filtrar o status)</span></h3>
-                    <div class="h-64"><canvas id="chartStatus"></canvas></div>
+                <div id="container-chartStatus" class="bg-white p-4 rounded-lg shadow h-96 flex flex-col justify-between">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-sm font-bold text-gray-700">Status dos Recebimentos <span class="text-xs font-normal text-gray-400">(clique para filtrar)</span></h3>
+                        <button onclick="toggleExpandChart('container-chartStatus')" class="p-1 text-gray-500 hover:text-blue-600 rounded bg-gray-100 hover:bg-gray-200" title="Expandir/Restaurar Tela Cheia">
+                            <i data-lucide="maximize-2" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                    <div class="flex-1 relative w-full h-full min-h-0"><canvas id="chartStatus"></canvas></div>
                 </div>
             </div>
-            <div class="bg-white p-4 rounded-lg shadow h-80">
-                <h3 class="text-sm font-bold text-gray-700 mb-2">Evolução Mensal: Média de Peso (kg) e Volume por Viagem <span class="text-xs font-normal text-gray-400">(clique para filtrar o mês)</span></h3>
-                <div class="h-64"><canvas id="chartPesoVolume"></canvas></div>
+            <div id="container-chartPesoVolume" class="bg-white p-4 rounded-lg shadow h-96 flex flex-col justify-between">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-sm font-bold text-gray-700">Evolução Mensal: Média de Peso (kg) e Volume por Viagem <span class="text-xs font-normal text-gray-400">(clique para filtrar)</span></h3>
+                    <button onclick="toggleExpandChart('container-chartPesoVolume')" class="p-1 text-gray-500 hover:text-blue-600 rounded bg-gray-100 hover:bg-gray-200" title="Expandir/Restaurar Tela Cheia">
+                        <i data-lucide="maximize-2" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <div class="flex-1 relative w-full h-full min-h-0"><canvas id="chartPesoVolume"></canvas></div>
             </div>
         </section>
 
@@ -770,49 +809,152 @@
             return mesISO;
         }
 
-        function initDB() {
-            return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, DB_VERSION);
-                request.onupgradeneeded = (e) => {
-                    const db = e.target.result;
-                    if (!db.objectStoreNames.contains('servicos')) db.createObjectStore('servicos', { keyPath: 'id' });
-                    if (!db.objectStoreNames.contains('manutencoes')) db.createObjectStore('manutencoes', { keyPath: 'id' });
-                    if (!db.objectStoreNames.contains('categorias')) db.createObjectStore('categorias', { keyPath: 'id' });
-                    if (!db.objectStoreNames.contains('usuarios')) db.createObjectStore('usuarios', { keyPath: 'usuario' });
-                };
-                request.onsuccess = (e) => { db = e.target.result; resolve(db); };
-                request.onerror = (e) => reject(e.target.error);
-            });
+        const API_URL = 'https://script.google.com/macros/s/AKfycbxQgR82LYpW3dZgG56-vZRbv3LXp18NM3XsEhMcF5ZFxTo371YL7GZmev5xHR9QKsCe/exec';
+
+        // ===== CACHE LOCAL DO BANCO =====
+        let DB_CACHE = {
+            servicos: [],
+            manutencoes: [],
+            categorias: [],
+            usuarios: []
+        };
+        let DB_CARREGADO = false;
+        let DB_CARREGANDO = null;
+
+        function validarApiConfigurada() {
+            if (!API_URL || API_URL.includes('COLE_AQUI')) {
+                throw new Error('Configure a constante API_URL com a URL do Google Apps Script.');
+            }
         }
 
-        function getAllData(storeName) {
-            return new Promise((resolve, reject) => {
-                const tx = db.transaction(storeName, 'readonly');
-                const store = tx.objectStore(storeName);
-                const request = store.getAll();
-                request.onsuccess = () => resolve(request.result || []);
-                request.onerror = (e) => reject(e.target.error);
-            });
+        async function apiFetch(url, options = {}, timeoutMs = 20000) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                return await fetch(url, { ...options, signal: controller.signal, cache: 'no-store' });
+            } finally {
+                clearTimeout(timer);
+            }
         }
 
-        function putData(storeName, data) {
-            return new Promise((resolve, reject) => {
-                const tx = db.transaction(storeName, 'readwrite');
-                const store = tx.objectStore(storeName);
-                const request = store.put(data);
-                request.onsuccess = () => resolve(request.result);
-                request.onerror = (e) => reject(e.target.error);
-            });
+        async function respostaAPI(resposta) {
+            if (!resposta.ok) throw new Error(`HTTP ${resposta.status}`);
+            const texto = await resposta.text();
+            let json;
+            try {
+                json = JSON.parse(texto);
+            } catch (e) {
+                throw new Error('Resposta inválida do Google Apps Script: ' + texto.substring(0, 250));
+            }
+            if (!json.ok) throw new Error(json.error || 'Erro desconhecido na API.');
+            return json;
         }
 
-        function deleteData(storeName, id) {
-            return new Promise((resolve, reject) => {
-                const tx = db.transaction(storeName, 'readwrite');
-                const store = tx.objectStore(storeName);
-                const request = store.delete(id);
-                request.onsuccess = () => resolve();
-                request.onerror = (e) => reject(e.target.error);
+        async function apiGet(params = {}) {
+            validarApiConfigurada();
+            const url = new URL(API_URL);
+            Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+            const resposta = await apiFetch(url.toString(), { method: 'GET' });
+            return respostaAPI(resposta);
+        }
+
+        async function apiPost(payload = {}) {
+            validarApiConfigurada();
+            const resposta = await apiFetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
             });
+            return respostaAPI(resposta);
+        }
+
+        function normalizarBanco(data) {
+            const base = { servicos: [], manutencoes: [], categorias: [], usuarios: [] };
+            Object.keys(base).forEach(chave => {
+                base[chave] = Array.isArray(data?.[chave]) ? data[chave] : [];
+            });
+            return base;
+        }
+
+        async function carregarBancoCompleto(force = false) {
+            if (DB_CARREGADO && !force) return DB_CACHE;
+            if (DB_CARREGANDO && !force) return DB_CARREGANDO;
+
+            DB_CARREGANDO = (async () => {
+                const resposta = await apiGet({ action: 'getDb' });
+                DB_CACHE = normalizarBanco(resposta.data || {});
+                DB_CARREGADO = true;
+                return DB_CACHE;
+            })();
+
+            try {
+                return await DB_CARREGANDO;
+            } finally {
+                DB_CARREGANDO = null;
+            }
+        }
+
+        function atualizarCacheAposSalvar(storeName, registro) {
+            if (!DB_CACHE[storeName]) DB_CACHE[storeName] = [];
+            const keyName = storeName === 'usuarios' ? 'usuario' : 'id';
+            const idx = DB_CACHE[storeName].findIndex(x => String(x[keyName]) === String(registro[keyName]));
+
+            const pronto = storeName === 'usuarios'
+                ? { usuario: registro.usuario, isAdmin: !!registro.isAdmin, guias: Array.isArray(registro.guias) ? registro.guias : [] }
+                : registro;
+
+            if (idx >= 0) DB_CACHE[storeName][idx] = pronto;
+            else DB_CACHE[storeName].push(pronto);
+            return pronto;
+        }
+
+        function atualizarCacheAposExcluir(storeName, id) {
+            if (!DB_CACHE[storeName]) return;
+            const keyName = storeName === 'usuarios' ? 'usuario' : 'id';
+            DB_CACHE[storeName] = DB_CACHE[storeName].filter(x => String(x[keyName]) !== String(id));
+        }
+
+        async function initDB() {
+            await carregarBancoCompleto();
+            return { remoto: true };
+        }
+
+        async function getAllData(storeName) {
+            await carregarBancoCompleto();
+            return Array.isArray(DB_CACHE[storeName]) ? DB_CACHE[storeName] : [];
+        }
+
+        async function putData(storeName, data) {
+            const resposta = await apiPost({ action: 'put', store: storeName, data });
+            const salvo = resposta.data;
+            atualizarCacheAposSalvar(storeName, salvo);
+            return salvo;
+        }
+
+        async function putManyData(storeName, registros) {
+            if (!Array.isArray(registros) || registros.length === 0) return [];
+            const resposta = await apiPost({ action: 'putMany', store: storeName, data: registros });
+            const salvos = Array.isArray(resposta.data) ? resposta.data : [];
+            salvos.forEach(registro => atualizarCacheAposSalvar(storeName, registro));
+            return salvos;
+        }
+
+        async function deleteData(storeName, id) {
+            await apiPost({ action: 'delete', store: storeName, id });
+            atualizarCacheAposExcluir(storeName, id);
+            return true;
+        }
+
+        async function atualizarDadosDoServidor() {
+            try {
+                await carregarBancoCompleto(true);
+                renderizarTodasGuias();
+                await carregarOpcoesCategorias();
+                alert('Dados atualizados com sucesso.');
+            } catch (erro) {
+                console.error(erro);
+                alert('Não foi possível atualizar os dados: ' + erro.message);
+            }
         }
 
         function gerarHashSHA256(texto) {
@@ -838,13 +980,11 @@
             const pass = document.getElementById('login-senha').value;
             const passHash = gerarHashSHA256(pass);
 
-            const tx = db.transaction('usuarios', 'readonly');
-            const store = tx.objectStore('usuarios');
-            const request = store.get(user);
+            try {
+                const resposta = await apiPost({ action: 'login', usuario: user, senhaHash: passHash });
+                const usuarioEncontrado = resposta.ok ? resposta.data : null;
 
-            request.onsuccess = async () => {
-                const usuarioEncontrado = request.result;
-                if (usuarioEncontrado && usuarioEncontrado.senhaHash === passHash) {
+                if (usuarioEncontrado) {
                     sessionStorage.setItem('usuarioAutenticado', user);
                     document.getElementById('modal-login').classList.add('hidden');
                     document.getElementById('form-login').reset();
@@ -853,27 +993,34 @@
                 } else {
                     document.getElementById('login-erro').classList.remove('hidden');
                 }
-            };
+            } catch (erro) {
+                console.error(erro);
+                alert('Não foi possível acessar o servidor. Verifique a configuração do Google Apps Script.');
+            }
         }
 
         async function verificarAutenticacao() {
             const aut = sessionStorage.getItem('usuarioAutenticado');
             if (!aut) {
                 document.getElementById('modal-login').classList.remove('hidden');
-            } else {
-                const tx = db.transaction('usuarios', 'readonly');
-                const store = tx.objectStore('usuarios');
-                const request = store.get(aut);
-                request.onsuccess = () => {
-                    usuarioAtualObjeto = request.result;
-                    if (!usuarioAtualObjeto) {
-                        fazerLogout();
-                        return;
-                    }
-                    document.getElementById('modal-login').classList.add('hidden');
-                    document.getElementById('usuario-logado-info').innerText = `Logado: ${usuarioAtualObjeto.usuario} ${usuarioAtualObjeto.isAdmin ? '(Admin)' : ''}`;
-                    atualizarVisibilidadeNav();
-                };
+                return;
+            }
+
+            try {
+                await carregarBancoCompleto();
+                const usuarios = DB_CACHE.usuarios || [];
+                usuarioAtualObjeto = usuarios.find(u => u.usuario === aut);
+                if (!usuarioAtualObjeto) {
+                    fazerLogout();
+                    return;
+                }
+                document.getElementById('modal-login').classList.add('hidden');
+                document.getElementById('usuario-logado-info').innerText = `Logado: ${usuarioAtualObjeto.usuario} ${usuarioAtualObjeto.isAdmin ? '(Admin)' : ''}`;
+                atualizarVisibilidadeNav();
+            } catch (erro) {
+                console.error(erro);
+                fazerLogout();
+                alert('Não foi possível consultar o usuário no servidor.');
             }
         }
 
@@ -1465,7 +1612,6 @@
             }
         }
 
-        // ===== Filtro de múltiplas categorias (Gestão do Veículo) =====
         function getFiltroCategorias() {
             return Array.from(document.querySelectorAll('#lista-filtro-categorias .chk-filtro-categoria:checked')).map(c => c.value);
         }
@@ -1575,12 +1721,14 @@
                 if (total <= 0 || qtd <= 0) { alert('Informe o valor total e o número de parcelas.'); return; }
                 const valorParcela = Math.round((total / qtd) * 100) / 100;
                 let acumulado = 0;
+                const agora = Date.now();
+                const parcelas = [];
                 for (let i = 0; i < qtd; i++) {
                     let valor = valorParcela;
                     if (i === qtd - 1) valor = Math.round((total - acumulado) * 100) / 100;
                     acumulado += valor;
-                    await putData('manutencoes', {
-                        id: Date.now() + i,
+                    parcelas.push({
+                        id: agora + i,
                         orcamentoNo: documento,
                         data: somarMeses(dataBase, i),
                         categoria: categoria,
@@ -1592,6 +1740,7 @@
                         totalParcelas: qtd
                     });
                 }
+                await putManyData('manutencoes', parcelas);
             } else {
                 const valor = parseFloat(document.getElementById('dv-valor').value) || 0;
                 if (valor <= 0) { alert('Informe o valor da despesa.'); return; }
@@ -1641,7 +1790,6 @@
             let gastoPedagio = 0;
 
             let litrosAbastecidos = 0;
-            // Cards seguem o mesmo filtro de data (guia Servicos Prestados)
             const servicosFiltrados = servicos.filter(s => {
                 const combinaDataInicio = dataInicio ? s.dataServico >= dataInicio : true;
                 const combinaDataFim = dataFim ? s.dataServico <= dataFim : true;
@@ -1712,15 +1860,25 @@
         function limparFiltrosDashboard() {
             document.getElementById('filtro-dash-status').value = 'todos';
             document.getElementById('filtro-dash-regiao').value = '';
+            document.getElementById('filtro-dash-limite').value = '12';
             limparDatasGlobais();
         }
 
-
-        // ===== Filtro de data GLOBAL (compartilhado entre todas as guias) =====
         const DATE_FILTER_INPUTS = {
             inicio: ['filtro-servico-data-inicio', 'filtro-receber-data-inicio', 'filtro-manutencao-data-inicio', 'filtro-dash-inicio'],
             fim: ['filtro-servico-data-fim', 'filtro-receber-data-fim', 'filtro-manutencao-data-fim', 'filtro-dash-fim']
         };
+
+        const RENDER_TIMERS = {};
+        function agendarRenderizacao(guia) {
+            clearTimeout(RENDER_TIMERS[guia]);
+            RENDER_TIMERS[guia] = setTimeout(() => {
+                if (guia === 'servicos') renderizarServicos();
+                if (guia === 'receber') renderizarReceber();
+                if (guia === 'veiculo') renderizarVeiculo();
+                if (guia === 'dashboard') renderizarDashboard();
+            }, 220);
+        }
 
         function renderizarTodasGuias() {
             if (typeof renderizarServicos === 'function') renderizarServicos();
@@ -1775,191 +1933,244 @@
             renderizarDashboard();
         }
 
+        function toggleExpandChart(containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            const isFullscreen = container.classList.contains('chart-fullscreen-modal');
+            if (isFullscreen) {
+                container.classList.remove('chart-fullscreen-modal');
+            } else {
+                container.classList.add('chart-fullscreen-modal');
+            }
+
+            // Redimensiona os gráficos no evento para recalcular resolução de exibição
+            setTimeout(() => {
+                if (chartFinanceiroInstance) chartFinanceiroInstance.resize();
+                if (chartStatusInstance) chartStatusInstance.resize();
+                if (chartPesoVolumeInstance) chartPesoVolumeInstance.resize();
+            }, 50);
+        }
+
         async function renderizarDashboard() {
             let servicos = await getAllData('servicos');
             let manutençoes = await getAllData('manutencoes');
 
             const statusFiltro = document.getElementById('filtro-dash-status').value;
+            const regiaoFiltro = document.getElementById('filtro-dash-regiao').value.toLowerCase().trim();
             const dataInicio = document.getElementById('filtro-dash-inicio').value;
             const dataFim = document.getElementById('filtro-dash-fim').value;
-            const regiaoTexto = document.getElementById('filtro-dash-regiao').value.trim().toLowerCase();
+            const limiteItens = parseInt(document.getElementById('filtro-dash-limite').value) || 0;
             const hoje = new Date().toISOString().split('T')[0];
 
-            servicos = servicos.filter(s => {
-                let st = 'pendente';
-                if (s.dataRecebido) st = 'recebido';
-                else if (s.vencimento && s.vencimento < hoje) st = 'vencido';
-
-                const combinaStatus = statusFiltro === 'todos' || st === statusFiltro;
-                const combinaDataInicio = dataInicio ? s.dataServico >= dataInicio : true;
-                const combinaDataFim = dataFim ? s.dataServico <= dataFim : true;
-                const combinaRegiao = regiaoTexto === '' || (s.regiao && s.regiao.toLowerCase().includes(regiaoTexto));
-                return combinaStatus && combinaDataInicio && combinaDataFim && combinaRegiao;
-            });
-
-            manutençoes = manutençoes.filter(m => {
-                const combinaDataInicio = dataInicio ? m.data >= dataInicio : true;
-                const combinaDataFim = dataFim ? m.data <= dataFim : true;
-                return combinaDataInicio && combinaDataFim;
+            let servicosFiltrados = servicos.filter(s => {
+                let status = s.dataRecebido ? 'recebido' : (s.vencimento < hoje ? 'vencido' : 'pendente');
+                const cStatus = (statusFiltro === 'todos') || (statusFiltro === status);
+                const cRegiao = !regiaoFiltro || (s.regiao || '').toLowerCase().includes(regiaoFiltro);
+                const cInicio = !dataInicio || (s.dataServico >= dataInicio);
+                const cFim = !dataFim || (s.dataServico <= dataFim);
+                return cStatus && cRegiao && cInicio && cFim;
             });
 
             let totalPeso = 0;
             let totalVolumes = 0;
             let totalFrete = 0;
             let totalRecebido = 0;
-            let totalPendente = 0;
-            let totalVencido = 0;
+            let totalFaltaReceber = 0;
 
-            servicos.forEach(s => {
-                totalPeso += (s.peso || 0);
-                totalVolumes += (s.volumes || 0);
-                totalFrete += (s.freteTransp || 0);
+            let statusCounts = { recebido: 0, pendente: 0, vencido: 0 };
+            let statusValores = { recebido: 0, pendente: 0, vencido: 0 };
 
-                const vlr = s.valorCobrado || 0;
-                if (s.dataRecebido) {
-                    totalRecebido += vlr;
-                } else if (s.vencimento && s.vencimento < hoje) {
-                    totalVencido += vlr;
+            servicosFiltrados.forEach(s => {
+                totalPeso += s.peso || 0;
+                totalVolumes += s.volumes || 0;
+                totalFrete += s.freteTransp || 0;
+
+                const subtotal = (s.valorCobrado || 0) + (s.adicional || 0);
+                let st = s.dataRecebido ? 'recebido' : (s.vencimento < hoje ? 'vencido' : 'pendente');
+                
+                statusCounts[st]++;
+                statusValores[st] += subtotal;
+
+                if (st === 'recebido') {
+                    totalRecebido += subtotal;
                 } else {
-                    totalPendente += vlr;
+                    totalFaltaReceber += subtotal;
                 }
             });
 
-            document.getElementById('card-total-peso').innerText = `${totalPeso.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} kg`;
+            document.getElementById('card-total-peso').innerText = `${totalPeso.toLocaleString('pt-BR')} kg`;
             document.getElementById('card-total-volumes').innerText = totalVolumes.toLocaleString('pt-BR');
-            document.getElementById('card-total-frete').innerText = `R$ ${totalFrete.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-            
-            document.getElementById('card-total-recebido').innerText = `R$ ${totalRecebido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-            document.getElementById('card-falta-receber').innerText = `(Pendentes: R$ ${totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Vencidos: R$ ${totalVencido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})`;
+            document.getElementById('card-total-frete').innerText = `R$ ${formatarMoedaBR(totalFrete)}`;
+            document.getElementById('card-total-recebido').innerText = `R$ ${formatarMoedaBR(totalRecebido)}`;
+            document.getElementById('card-falta-receber').innerText = `A receber/vencido: R$ ${formatarMoedaBR(totalFaltaReceber)}`;
 
-            const meses = {};
-            servicos.forEach(s => {
+            let mensalData = {};
+
+            servicosFiltrados.forEach(s => {
                 if (!s.dataServico) return;
                 const mes = s.dataServico.substring(0, 7);
-                if(!meses[mes]) meses[mes] = { ganhos: 0, despesas: 0, pesoTotal: 0, volumeTotal: 0, qtdServicos: 0 };
-                meses[mes].ganhos += (s.valorCobrado || 0);
-                meses[mes].despesas += ((s.vlrCombustivel || 0) + (s.vlrPedagio || 0));
-                meses[mes].pesoTotal += (s.peso || 0);
-                meses[mes].volumeTotal += (s.volumes || 0);
-                meses[mes].qtdServicos += 1;
+                if (!mensalData[mes]) {
+                    mensalData[mes] = { receita: 0, despesa: 0, peso: 0, volume: 0, viagens: 0 };
+                }
+                const subtotal = (s.valorCobrado || 0) + (s.adicional || 0);
+                mensalData[mes].receita += subtotal;
+                mensalData[mes].despesa += (s.vlrPedagio || 0) + (s.vlrCombustivel || 0);
+                mensalData[mes].peso += s.peso || 0;
+                mensalData[mes].volume += s.volumes || 0;
+                mensalData[mes].viagens += 1;
             });
 
-            manutençoes.forEach(m => {
+            let manutençoesFiltradas = manutençoes.filter(m => {
+                const cInicio = !dataInicio || (m.data >= dataInicio);
+                const cFim = !dataFim || (m.data <= dataFim);
+                return cInicio && cFim;
+            });
+
+            manutençoesFiltradas.forEach(m => {
                 if (!m.data) return;
                 const mes = m.data.substring(0, 7);
-                if(!meses[mes]) meses[mes] = { ganhos: 0, despesas: 0, pesoTotal: 0, volumeTotal: 0, qtdServicos: 0 };
-                meses[mes].despesas += (m.valor || 0);
+                if (!mensalData[mes]) {
+                    mensalData[mes] = { receita: 0, despesa: 0, peso: 0, volume: 0, viagens: 0 };
+                }
+                mensalData[mes].despesa += m.valor || 0;
             });
 
-            const labelsMesesISO = Object.keys(meses).sort();
-            const labelsMesesBR = labelsMesesISO.map(m => formatarMesAnoBR(m));
-            
-            const dadosGanhos = labelsMesesISO.map(m => meses[m].ganhos);
-            const dadosDespesas = labelsMesesISO.map(m => meses[m].despesas);
-            const mediaPeso = labelsMesesISO.map(m => meses[m].qtdServicos > 0 ? (meses[m].pesoTotal / meses[m].qtdServicos) : 0);
-            const mediaVolumes = labelsMesesISO.map(m => meses[m].qtdServicos > 0 ? (meses[m].volumeTotal / meses[m].qtdServicos) : 0);
+            let mesesOrdenados = Object.keys(mensalData).sort();
 
+            if (limiteItens > 0 && mesesOrdenados.length > limiteItens) {
+                mesesOrdenados = mesesOrdenados.slice(-limiteItens);
+            }
+
+            const labelsMeses = mesesOrdenados.map(formatarMesAnoBR);
+            const receitaArray = mesesOrdenados.map(m => mensalData[m].receita);
+            const despesaArray = mesesOrdenados.map(m => mensalData[m].despesa);
+
+            const mediaPesoArray = mesesOrdenados.map(m => mensalData[m].viagens ? (mensalData[m].peso / mensalData[m].viagens) : 0);
+            const mediaVolArray = mesesOrdenados.map(m => mensalData[m].viagens ? (mensalData[m].volume / mensalData[m].viagens) : 0);
+
+            // Chart Financeiro
             if (chartFinanceiroInstance) chartFinanceiroInstance.destroy();
-            if (chartStatusInstance) chartStatusInstance.destroy();
-            if (chartPesoVolumeInstance) chartPesoVolumeInstance.destroy();
-
-            const ctx1 = document.getElementById('chartFinanceiro').getContext('2d');
-            chartFinanceiroInstance = new Chart(ctx1, {
+            const ctxFin = document.getElementById('chartFinanceiro').getContext('2d');
+            chartFinanceiroInstance = new Chart(ctxFin, {
                 type: 'bar',
                 data: {
-                    labels: labelsMesesBR,
+                    labels: labelsMeses,
                     datasets: [
-                        { label: 'Ganhos (R$)', data: dadosGanhos, backgroundColor: '#22c55e' },
-                        { label: 'Despesas (R$)', data: dadosDespesas, backgroundColor: '#ef4444' }
+                        { label: 'Ganhos (R$)', data: receitaArray, backgroundColor: '#22c55e' },
+                        { label: 'Despesas (R$)', data: despesaArray, backgroundColor: '#ef4444' }
                     ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-                    onClick: (e, els) => { if (els.length) filtrarDashboardPorMes(labelsMesesISO[els[0].index]); }
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': R$ ' + formatarMoedaBR(context.raw);
+                                }
+                            }
+                        }
+                    },
+                    onClick: (e, elements) => {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            filtrarDashboardPorMes(mesesOrdenados[index]);
+                        }
+                    }
                 }
             });
 
-            let recebidos = 0, pendentes = 0, vencidos = 0;
-            servicos.forEach(s => {
-                if (s.dataRecebido) recebidos++;
-                else if (s.vencimento && s.vencimento < hoje) vencidos++;
-                else pendentes++;
-            });
-
-            const ctx2 = document.getElementById('chartStatus').getContext('2d');
-            chartStatusInstance = new Chart(ctx2, {
-                type: 'pie',
+            // Chart Status
+            if (chartStatusInstance) chartStatusInstance.destroy();
+            const ctxStatus = document.getElementById('chartStatus').getContext('2d');
+            chartStatusInstance = new Chart(ctxStatus, {
+                type: 'doughnut',
                 data: {
                     labels: ['Recebidos', 'Pendentes', 'Vencidos'],
                     datasets: [{
-                        data: [recebidos, pendentes, vencidos],
-                        backgroundColor: ['#10b981', '#f59e0b', '#ef4444']
+                        data: [statusValores.recebido, statusValores.pendente, statusValores.vencido],
+                        backgroundColor: ['#22c55e', '#f59e0b', '#ef4444']
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { position: 'bottom' } },
-                    onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-                    onClick: (e, els) => {
-                        if (!els.length) return;
-                        filtrarDashboardPorStatus(['recebido', 'pendente', 'vencido'][els[0].index]);
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const val = context.raw || 0;
+                                    return `${label}: R$ ${formatarMoedaBR(val)}`;
+                                }
+                            }
+                        }
+                    },
+                    onClick: (e, elements) => {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            const statusClick = ['recebido', 'pendente', 'vencido'][index];
+                            filtrarDashboardPorStatus(statusClick);
+                        }
                     }
                 }
             });
 
-            const ctx3 = document.getElementById('chartPesoVolume').getContext('2d');
-            chartPesoVolumeInstance = new Chart(ctx3, {
+            // Chart Peso/Volume
+            if (chartPesoVolumeInstance) chartPesoVolumeInstance.destroy();
+            const ctxPV = document.getElementById('chartPesoVolume').getContext('2d');
+            chartPesoVolumeInstance = new Chart(ctxPV, {
                 type: 'line',
                 data: {
-                    labels: labelsMesesBR,
+                    labels: labelsMeses,
                     datasets: [
-                        { label: 'Média Peso (kg)', data: mediaPeso, borderColor: '#3b82f6', backgroundColor: '#3b82f6', fill: false, yAxisID: 'y' },
-                        { label: 'Média Volumes', data: mediaVolumes, borderColor: '#f97316', backgroundColor: '#f97316', fill: false, yAxisID: 'y1' }
+                        { label: 'Média Peso (kg)', data: mediaPesoArray, borderColor: '#3b82f6', backgroundColor: '#3b82f6', yAxisID: 'y' },
+                        { label: 'Média Vol.', data: mediaVolArray, borderColor: '#f59e0b', backgroundColor: '#f59e0b', yAxisID: 'y1' }
                     ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-                    onClick: (e, els) => { if (els.length) filtrarDashboardPorMes(labelsMesesISO[els[0].index]); },
                     scales: {
-                        y: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Peso (kg)' } },
-                        y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Volumes' } }
+                        y: { type: 'linear', position: 'left', title: { display: true, text: 'Média Peso (kg)' } },
+                        y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Média Volume' } }
+                    },
+                    onClick: (e, elements) => {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            filtrarDashboardPorMes(mesesOrdenados[index]);
+                        }
                     }
                 }
             });
-            
-            lucide.createIcons();
         }
 
         async function renderizarUsuarios() {
             const tbody = document.getElementById('tabela-usuarios');
             tbody.innerHTML = '';
+
             const usuarios = await getAllData('usuarios');
 
             usuarios.forEach(u => {
-                const badgeAdmin = u.isAdmin 
-                    ? `<span class="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded font-bold">Administrador</span>` 
-                    : `<span class="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded font-semibold">Usuário Comum</span>`;
-
-                const guiasTexto = u.isAdmin ? 'Todas as guias' : (u.guias && u.guias.length > 0 ? u.guias.join(', ') : 'Nenhuma');
+                const tipo = u.isAdmin ? '<span class="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded-full font-bold">Administrador</span>' : '<span class="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded-full font-semibold">Padrão</span>';
+                const guias = u.isAdmin ? 'Acesso Total' : (u.guias || []).join(', ');
 
                 tbody.innerHTML += `
-                    <tr class="border-b hover:bg-gray-50 transition-colors">
-                        <td class="p-3 border font-bold">${u.usuario}</td>
-                        <td class="p-3 border">${badgeAdmin}</td>
-                        <td class="p-3 border text-xs">${guiasTexto}</td>
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="p-3 border font-semibold">${u.usuario}</td>
+                        <td class="p-3 border">${tipo}</td>
+                        <td class="p-3 border">${guias}</td>
                         <td class="p-3 border text-center">
                             <div class="flex items-center justify-center space-x-2">
                                 <button onclick="editarUsuario('${u.usuario}')" class="text-blue-600 hover:text-blue-800 p-1" title="Editar">
                                     <i data-lucide="pencil" class="w-4 h-4"></i>
                                 </button>
+                                ${u.usuario !== 'admin' ? `
                                 <button onclick="excluirUsuario('${u.usuario}')" class="text-red-600 hover:text-red-800 p-1" title="Excluir">
                                     <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                </button>
+                                </button>` : ''}
                             </div>
                         </td>
                     </tr>
@@ -1969,41 +2180,41 @@
         }
 
         function abrirModalUsuario() {
-            document.getElementById('form-usuario').reset();
-            document.getElementById('edit-usuario-original').value = '';
-            document.getElementById('usr-nome').disabled = false;
-            document.getElementById('form-usuario-title').innerText = "Novo Usuário";
-            toggleAdminCheckboxStatus();
+            limparFormularioUsuario();
             document.getElementById('modal-usuario').classList.remove('hidden');
         }
 
         function fecharModalUsuario() {
             document.getElementById('modal-usuario').classList.add('hidden');
+            limparFormularioUsuario();
+        }
+
+        function limparFormularioUsuario() {
+            document.getElementById('form-usuario').reset();
+            document.getElementById('edit-usuario-original').value = '';
+            document.getElementById('form-usuario-title').innerText = "Novo Usuário";
+            toggleAdminCheckboxStatus();
         }
 
         function toggleAdminCheckboxStatus() {
             const isAdmin = document.getElementById('usr-admin').checked;
-            const checkboxes = document.querySelectorAll('.chk-guia');
-            checkboxes.forEach(c => {
-                c.disabled = isAdmin;
-                if (isAdmin) c.checked = true;
-            });
+            const container = document.getElementById('container-permissoes');
+            container.style.opacity = isAdmin ? '0.5' : '1';
+            container.querySelectorAll('input').forEach(chk => chk.disabled = isAdmin);
         }
 
-        async function editarUsuario(username) {
+        async function editarUsuario(nomeUsuario) {
             const usuarios = await getAllData('usuarios');
-            const u = usuarios.find(usr => usr.usuario === username);
+            const u = usuarios.find(item => item.usuario === nomeUsuario);
             if (!u) return;
 
             document.getElementById('edit-usuario-original').value = u.usuario;
             document.getElementById('usr-nome').value = u.usuario;
-            document.getElementById('usr-nome').disabled = true;
             document.getElementById('usr-senha').value = '';
             document.getElementById('usr-admin').checked = !!u.isAdmin;
 
-            const checkboxes = document.querySelectorAll('.chk-guia');
-            checkboxes.forEach(c => {
-                c.checked = u.isAdmin || (u.guias && u.guias.includes(c.value));
+            document.querySelectorAll('.chk-guia').forEach(chk => {
+                chk.checked = u.guias && u.guias.includes(chk.value);
             });
 
             toggleAdminCheckboxStatus();
@@ -2013,70 +2224,63 @@
 
         async function salvarUsuario(e) {
             e.preventDefault();
-            const originalUser = document.getElementById('edit-usuario-original').value;
-            const username = document.getElementById('usr-nome').value.trim();
+            const original = document.getElementById('edit-usuario-original').value;
+            const nome = document.getElementById('usr-nome').value.trim();
             const senha = document.getElementById('usr-senha').value;
             const isAdmin = document.getElementById('usr-admin').checked;
 
+            if (!nome) {
+                alert("Informe o nome de usuário.");
+                return;
+            }
+
             const guiasSelecionadas = [];
-            document.querySelectorAll('.chk-guia:checked').forEach(c => guiasSelecionadas.push(c.value));
-
-            if (!originalUser) {
-                const usuarios = await getAllData('usuarios');
-                if (usuarios.some(u => u.usuario === username)) {
-                    alert("Usuário já existente!");
-                    return;
-                }
-                if (!senha) {
-                    alert("Senha é obrigatória para um novo usuário!");
-                    return;
-                }
-            }
-
-            let senhaHashFinal = '';
-            if (originalUser) {
-                const usuarios = await getAllData('usuarios');
-                const uOriginal = usuarios.find(usr => usr.usuario === originalUser);
-                senhaHashFinal = senha ? gerarHashSHA256(senha) : uOriginal.senhaHash;
+            if (!isAdmin) {
+                document.querySelectorAll('.chk-guia:checked').forEach(chk => guiasSelecionadas.push(chk.value));
             } else {
-                senhaHashFinal = gerarHashSHA256(senha);
+                guiasSelecionadas.push('servicos', 'receber', 'veiculo', 'relatorios', 'dashboard', 'usuarios');
             }
 
-            const dadosUsuario = {
-                usuario: username,
-                senhaHash: senhaHashFinal,
+            const registroUsuario = {
+                usuario: nome,
                 isAdmin: isAdmin,
-                guias: isAdmin ? ['servicos', 'receber', 'veiculo', 'relatorios', 'dashboard', 'usuarios'] : guiasSelecionadas
+                guias: guiasSelecionadas
             };
 
-            await putData('usuarios', dadosUsuario);
+            if (senha) {
+                registroUsuario.senhaHash = gerarHashSHA256(senha);
+            }
+
+            if (original && original !== nome) {
+                await deleteData('usuarios', original);
+            }
+
+            await putData('usuarios', registroUsuario);
             fecharModalUsuario();
             renderizarUsuarios();
         }
 
-        async function excluirUsuario(username) {
-            if (username === 'admin') {
-                alert("O usuário administrador principal 'admin' não pode ser excluído.");
+        async function excluirUsuario(nomeUsuario) {
+            if (nomeUsuario === 'admin') {
+                alert("O usuário administrador principal não pode ser excluído.");
                 return;
             }
-            if (usuarioAtualObjeto && usuarioAtualObjeto.usuario === username) {
-                alert("Você não pode excluir seu próprio usuário enquanto está logado.");
-                return;
-            }
-            if (confirm(`Deseja realmente excluir o usuário '${username}'?`)) {
-                await deleteData('usuarios', username);
+            if (confirm(`Deseja realmente excluir o usuário "${nomeUsuario}"?`)) {
+                await deleteData('usuarios', nomeUsuario);
                 renderizarUsuarios();
             }
         }
 
-        window.addEventListener('DOMContentLoaded', async () => {
-            await initDB();
-            await inicializarUsuarioPadrao();
-            await verificarAutenticacao();
-            await carregarOpcoesCategorias();
-            renderizarServicos();
-            lucide.createIcons();
-        });
+        window.onload = async function() {
+            try {
+                await initDB();
+                await inicializarUsuarioPadrao();
+                await verificarAutenticacao();
+                lucide.createIcons();
+            } catch (err) {
+                console.error("Erro ao inicializar:", err);
+            }
+        };
     </script>
 </body>
 </html>
