@@ -40,6 +40,29 @@
             flex-direction: column !important;
         }
 
+        /* ===== PROGRESSO DE OPERAÇÕES ===== */
+        #operacao-progresso {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            background: rgba(15, 23, 42, 0.72);
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        #operacao-progresso.visivel { display: flex; }
+        #operacao-progresso .op-card {
+            width: min(100%, 430px);
+            background: #fff;
+            border-radius: 1rem;
+            box-shadow: 0 25px 60px rgba(0,0,0,.3);
+            padding: 1.5rem;
+            text-align: center;
+        }
+        #op-barra { transition: width .25s ease; }
+        #op-icone { font-size: 2.2rem; line-height: 1; }
+
         /* ===== RESPONSIVIDADE (Computador / Celular) ===== */
         #mobile-topbar { display: none; }
         #sidebar-overlay { display: none; }
@@ -99,6 +122,20 @@
 
     <!-- FUNDO ESCURO DO MENU (CELULAR) -->
     <div id="sidebar-overlay" onclick="fecharSidebarMobile()" class="fixed inset-0 bg-black bg-opacity-50 z-10"></div>
+
+    <!-- BLOQUEIO E PROGRESSO DE OPERAÇÕES -->
+    <div id="operacao-progresso" aria-live="polite" aria-busy="false">
+        <div class="op-card">
+            <div id="op-icone" class="text-blue-600 mb-3">⏳</div>
+            <h2 id="op-titulo" class="text-lg font-bold text-slate-800">Processando...</h2>
+            <p id="op-detalhe" class="text-sm text-slate-500 mt-1 min-h-[20px]">Aguarde a conclusão.</p>
+            <div class="w-full bg-slate-200 rounded-full h-3 mt-5 overflow-hidden">
+                <div id="op-barra" class="h-3 rounded-full bg-blue-600" style="width:0%"></div>
+            </div>
+            <div id="op-percentual" class="text-sm font-bold text-blue-600 mt-2">0%</div>
+            <div id="op-status" class="text-xs text-slate-400 mt-3">Não feche nem tente executar outra operação.</div>
+        </div>
+    </div>
 
     <!-- MODAL DE LOGIN -->
     <div id="modal-login" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
@@ -360,7 +397,7 @@
             <div class="bg-white p-4 rounded-lg shadow mb-4 flex flex-wrap gap-3 items-end">
                 <div class="flex-1 min-w-[150px]">
                     <label class="block text-xs font-semibold text-gray-600">Buscar (Peça, Orçamento)</label>
-                    <input type="text" id="filtro-manutencao-busca" oninput="agendarRenderizacao('veiculo')" placeholder="Digite para filtrar..." class="w-full border rounded p-2 text-sm">
+                    <input type="text" id="filtro-manutencao-busca" oninput="manutencaoPaginaAtual=1; agendarRenderizacao('veiculo')" placeholder="Digite para filtrar..." class="w-full border rounded p-2 text-sm">
                 </div>
                 <div class="relative">
                     <label class="block text-xs font-semibold text-gray-600">Categorias</label>
@@ -385,6 +422,17 @@
                     <input type="date" id="filtro-manutencao-data-fim" onchange="aplicarDataGlobal('fim', this.value)" class="border rounded p-2 text-sm">
                 </div>
                 <button onclick="limparFiltrosManutencao()" class="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm">Limpar</button>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-600">Dados por página</label>
+                    <select id="manutencao-page-size" onchange="alterarPaginaManutencao(1)" class="border rounded p-2 text-sm font-semibold text-blue-600">
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                    </select>
+                </div>
+                <button onclick="excluirManutencoesFiltradas()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded text-sm flex items-center gap-1" title="Excluir todos os registros encontrados pelo filtro">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i> Excluir filtrados
+                </button>
                 <div class="relative">
                     <button onclick="toggleColumnMenu('col-menu-manutencao')" class="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded text-sm flex items-center gap-1">
                         <i data-lucide="columns" class="w-4 h-4"></i> Colunas
@@ -409,6 +457,10 @@
                     </thead>
                     <tbody id="tabela-manutencao"></tbody>
                 </table>
+            </div>
+            <div id="manutencao-paginacao" class="bg-white rounded-lg shadow mt-3 p-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span id="manutencao-paginacao-info" class="text-gray-500">0 registros</span>
+                <div id="manutencao-paginacao-botoes" class="flex items-center gap-1"></div>
             </div>
         </section>
 
@@ -820,6 +872,8 @@
         };
         let DB_CARREGADO = false;
         let DB_CARREGANDO = null;
+        let manutencaoPaginaAtual = 1;
+        let manutencaoTotalFiltrado = 0;
 
         function validarApiConfigurada() {
             if (!API_URL || API_URL.includes('COLE_AQUI')) {
@@ -867,6 +921,103 @@
             });
             return respostaAPI(resposta);
         }
+
+        // ===== CONTROLE DE PROGRESSO / BLOQUEIO DE OPERAÇÕES =====
+        let operacaoEmAndamento = false;
+        let operacaoTimer = null;
+
+        const aguardar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        function iniciarProgresso(titulo, detalhe = 'Enviando dados para o servidor...') {
+            if (operacaoEmAndamento) return false;
+            operacaoEmAndamento = true;
+
+            const modal = document.getElementById('operacao-progresso');
+            modal.classList.add('visivel');
+            modal.setAttribute('aria-busy', 'true');
+            document.getElementById('op-icone').textContent = '⏳';
+            document.getElementById('op-icone').className = 'text-blue-600 mb-3';
+            document.getElementById('op-titulo').textContent = titulo;
+            document.getElementById('op-detalhe').textContent = detalhe;
+            document.getElementById('op-barra').style.width = '0%';
+            document.getElementById('op-barra').className = 'h-3 rounded-full bg-blue-600';
+            document.getElementById('op-percentual').textContent = '0%';
+            document.getElementById('op-percentual').className = 'text-sm font-bold text-blue-600 mt-2';
+            document.getElementById('op-status').textContent = 'Não feche nem tente executar outra operação.';
+
+            clearInterval(operacaoTimer);
+            let atual = 0;
+            operacaoTimer = setInterval(() => {
+                if (atual < 88) {
+                    atual += atual < 40 ? 4 : 2;
+                    atualizarProgresso(atual);
+                }
+            }, 180);
+            return true;
+        }
+
+        function atualizarProgresso(percentual, detalhe = null) {
+            const p = Math.max(0, Math.min(100, Math.round(percentual)));
+            const barra = document.getElementById('op-barra');
+            const percentualEl = document.getElementById('op-percentual');
+            barra.style.width = `${p}%`;
+            percentualEl.textContent = `${p}%`;
+            if (detalhe) document.getElementById('op-detalhe').textContent = detalhe;
+        }
+
+        async function finalizarProgressoSucesso(mensagem = 'Operação concluída com sucesso!') {
+            clearInterval(operacaoTimer);
+            atualizarProgresso(100, mensagem);
+            document.getElementById('op-icone').textContent = '✓';
+            document.getElementById('op-icone').className = 'text-green-600 mb-3 font-bold';
+            document.getElementById('op-barra').className = 'h-3 rounded-full bg-green-600';
+            document.getElementById('op-percentual').className = 'text-sm font-bold text-green-600 mt-2';
+            document.getElementById('op-status').textContent = 'Pronto. O sistema será liberado.';
+            await aguardar(700);
+            fecharProgressoOperacao();
+        }
+
+        async function finalizarProgressoErro(mensagem = 'Não foi possível concluir a operação.') {
+            clearInterval(operacaoTimer);
+            atualizarProgresso(100, mensagem);
+            document.getElementById('op-icone').textContent = '⚠';
+            document.getElementById('op-icone').className = 'text-red-600 mb-3 font-bold';
+            document.getElementById('op-barra').className = 'h-3 rounded-full bg-red-600';
+            document.getElementById('op-percentual').className = 'text-sm font-bold text-red-600 mt-2';
+            document.getElementById('op-status').textContent = 'A operação terminou com erro. O sistema será liberado.';
+            await aguardar(1100);
+            fecharProgressoOperacao();
+        }
+
+        function fecharProgressoOperacao() {
+            clearInterval(operacaoTimer);
+            operacaoTimer = null;
+            operacaoEmAndamento = false;
+            const modal = document.getElementById('operacao-progresso');
+            if (modal) {
+                modal.classList.remove('visivel');
+                modal.setAttribute('aria-busy', 'false');
+            }
+        }
+
+        async function executarComProgresso(titulo, detalhe, acao) {
+            if (!iniciarProgresso(titulo, detalhe)) return null;
+            try {
+                const resultado = await acao(atualizarProgresso);
+                await finalizarProgressoSucesso('Operação concluída com sucesso!');
+                return resultado;
+            } catch (erro) {
+                console.error(erro);
+                await finalizarProgressoErro(erro?.message || 'Não foi possível concluir a operação.');
+                throw erro;
+            }
+        }
+
+        document.addEventListener('keydown', (event) => {
+            if (!operacaoEmAndamento) return;
+            event.preventDefault();
+            event.stopPropagation();
+        }, true);
 
         function normalizarBanco(data) {
             const base = { servicos: [], manutencoes: [], categorias: [], usuarios: [] };
@@ -1291,8 +1442,8 @@
 
         async function salvarServico(e) {
             e.preventDefault();
+            if (operacaoEmAndamento) return;
             const id = document.getElementById('edit-id').value;
-            
             const novoServico = {
                 id: id ? parseInt(id) : Date.now(),
                 dataServico: document.getElementById('dataServico').value,
@@ -1316,9 +1467,14 @@
                 adicional: parseFloat(document.getElementById('adicional').value) || 0,
             };
 
-            await putData('servicos', novoServico);
-            fecharModalServico();
-            renderizarServicos();
+            const titulo = id ? 'Atualizando lançamento' : 'Salvando novo lançamento';
+            await executarComProgresso(titulo, 'Gravando os dados no banco...', async (atualizar) => {
+                atualizar(20, 'Validando os dados...');
+                await putData('servicos', novoServico);
+                atualizar(92, 'Atualizando a tela...');
+                fecharModalServico();
+                await renderizarServicos();
+            });
         }
 
         async function renderizarServicos() {
@@ -1420,10 +1576,14 @@
         }
 
         async function excluirServico(id) {
-            if (confirm("Tem certeza que deseja excluir este serviço?")) {
+            if (operacaoEmAndamento) return;
+            if (!confirm('Tem certeza que deseja excluir este serviço?')) return;
+            await executarComProgresso('Excluindo lançamento', 'Removendo o registro do banco...', async (atualizar) => {
+                atualizar(25, 'Excluindo o registro...');
                 await deleteData('servicos', id);
-                renderizarServicos();
-            }
+                atualizar(92, 'Atualizando a tabela...');
+                await renderizarServicos();
+            });
         }
 
         function limparFormularioServico() {
@@ -1519,44 +1679,47 @@
         }
 
         async function darBaixa(id) {
+            if (operacaoEmAndamento) return;
             const hoje = new Date();
             const diaPadrao = String(hoje.getDate()).padStart(2, '0');
             const mesPadrao = String(hoje.getMonth() + 1).padStart(2, '0');
             const anoPadrao = hoje.getFullYear();
             const dataHojeBR = `${diaPadrao}/${mesPadrao}/${anoPadrao}`;
-
-            const dataEntradaBR = prompt("Informe a data do pagamento (DD/MM/AAAA):", dataHojeBR);
-            
+            const dataEntradaBR = prompt('Informe a data do pagamento (DD/MM/AAAA):', dataHojeBR);
             if (dataEntradaBR === null) return;
-            
             const partes = dataEntradaBR.trim().split('/');
             if (partes.length !== 3 || partes[0].length !== 2 || partes[1].length !== 2 || partes[2].length !== 4) {
-                alert("Data de pagamento inválida. Utilize o formato DD/MM/AAAA.");
+                alert('Data de pagamento inválida. Utilize o formato DD/MM/AAAA.');
                 return;
             }
-
             const dataISO = `${partes[2]}-${partes[1]}-${partes[0]}`;
-
             const servicos = await getAllData('servicos');
             const s = servicos.find(item => item.id === id);
-            if (s) {
-                s.dataRecebido = dataISO;
+            if (!s) return;
+            s.dataRecebido = dataISO;
+            await executarComProgresso('Registrando recebimento', 'Salvando a baixa no banco...', async (atualizar) => {
+                atualizar(25, 'Atualizando o recebimento...');
                 await putData('servicos', s);
-                renderizarReceber();
-            }
+                atualizar(92, 'Atualizando a tabela...');
+                await renderizarReceber();
+            });
         }
 
         async function salvarCategoria(e) {
             e.preventDefault();
+            if (operacaoEmAndamento) return;
             const input = document.getElementById('nomeCategoria');
             const nome = input.value.trim();
-            if (nome) {
+            if (!nome) return;
+            await executarComProgresso('Salvando categoria', 'Gravando a nova categoria no banco...', async (atualizar) => {
+                atualizar(25, 'Gravando a categoria...');
                 await putData('categorias', { id: Date.now(), nome });
+                atualizar(90, 'Atualizando as categorias...');
                 input.value = '';
                 await renderizarListaCategorias();
                 await carregarOpcoesCategorias();
-                renderizarVeiculo();
-            }
+                await renderizarVeiculo();
+            });
         }
 
         async function renderizarListaCategorias() {
@@ -1577,35 +1740,81 @@
         }
 
         async function excluirCategoria(id) {
-            if (confirm("Deseja excluir esta categoria?")) {
+            if (operacaoEmAndamento) return;
+            if (!confirm('Deseja excluir esta categoria?')) return;
+            await executarComProgresso('Excluindo categoria', 'Removendo a categoria do banco...', async (atualizar) => {
+                atualizar(25, 'Excluindo a categoria...');
                 await deleteData('categorias', id);
+                atualizar(90, 'Atualizando a lista de categorias...');
                 await renderizarListaCategorias();
                 await carregarOpcoesCategorias();
-                renderizarVeiculo();
+                await renderizarVeiculo();
+            });
+        }
+
+        async function obterCategoriasDisponiveis() {
+            // Primeiro usa o cache já carregado. Se não houver categorias,
+            // força uma atualização do banco remoto para garantir que o
+            // filtro reflita o que realmente está salvo no Google Apps Script.
+            let categoriasBanco = await getAllData('categorias');
+
+            if (!categoriasBanco.length) {
+                try {
+                    await carregarBancoCompleto(true);
+                    categoriasBanco = await getAllData('categorias');
+                } catch (erro) {
+                    console.warn('Não foi possível atualizar as categorias do servidor:', erro);
+                }
             }
+
+            const mapa = new Map();
+
+            // Categorias cadastradas na tabela/store de categorias.
+            categoriasBanco.forEach(c => {
+                const nome = String(c?.nome ?? c?.categoria ?? c?.descricao ?? '').trim();
+                if (nome) mapa.set(nome.toLowerCase(), nome);
+            });
+
+            // Segurança extra: também recupera categorias existentes nos
+            // próprios registros de manutenção, mesmo que a lista de
+            // categorias não tenha sido carregada no cache por algum motivo.
+            const manutencoes = await getAllData('manutencoes');
+            manutencoes.forEach(m => {
+                const nome = String(m?.categoria ?? '').trim();
+                if (nome) mapa.set(nome.toLowerCase(), nome);
+            });
+
+            return Array.from(mapa.values()).sort((a, b) =>
+                a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })
+            );
         }
 
         async function carregarOpcoesCategorias() {
-            const categorias = await getAllData('categorias');
-            
-            const selectModal = document.getElementById('categoriaManutencao');
-            const valorAtualModal = selectModal.value;
-            selectModal.innerHTML = '<option value="">Sem Categoria</option>';
-            categorias.forEach(c => {
-                selectModal.innerHTML += `<option value="${c.nome}">${c.nome}</option>`;
-            });
-            selectModal.value = valorAtualModal;
+            const nomesCategorias = await obterCategoriasDisponiveis();
 
+            const selectModal = document.getElementById('categoriaManutencao');
+            const valorAtualModal = selectModal ? selectModal.value : '';
+            if (selectModal) {
+                selectModal.innerHTML = '<option value="">Sem Categoria</option>';
+                nomesCategorias.forEach(nome => {
+                    selectModal.innerHTML += `<option value="${nome.replace(/"/g, '&quot;')}">${nome}</option>`;
+                });
+                selectModal.value = valorAtualModal;
+            }
+
+            // O filtro é reconstruído sempre a partir dos dados atuais do banco.
             const listaFiltro = document.getElementById('lista-filtro-categorias');
             if (listaFiltro) {
                 const marcadas = getFiltroCategorias();
                 listaFiltro.innerHTML = '';
-                const itens = categorias.map(c => ({ valor: c.nome, rotulo: c.nome }));
+
+                const itens = nomesCategorias.map(nome => ({ valor: nome, rotulo: nome }));
                 itens.push({ valor: '', rotulo: 'Sem Categoria' });
+
                 itens.forEach(it => {
                     const checked = marcadas.includes(it.valor) ? 'checked' : '';
                     listaFiltro.innerHTML += `<label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" class="chk-filtro-categoria" value="${it.valor}" ${checked} onchange="onChangeFiltroCategorias()"> ${it.rotulo}
+                        <input type="checkbox" class="chk-filtro-categoria" value="${String(it.valor).replace(/"/g, '&quot;')}" ${checked} onchange="onChangeFiltroCategorias()"> ${it.rotulo}
                     </label>`;
                 });
                 atualizarLabelFiltroCategorias();
@@ -1627,6 +1836,7 @@
         }
 
         function onChangeFiltroCategorias() {
+            manutencaoPaginaAtual = 1;
             atualizarLabelFiltroCategorias();
             renderizarVeiculo();
         }
@@ -1651,6 +1861,7 @@
 
         async function salvarManutencao(e) {
             e.preventDefault();
+            if (operacaoEmAndamento) return;
             const novaManutencao = {
                 id: Date.now(),
                 orcamentoNo: document.getElementById('orcamentoNo').value,
@@ -1660,9 +1871,13 @@
                 peca: document.getElementById('pecaTrocada').value,
                 garantia: document.getElementById('dataGarantia').value
             };
-            await putData('manutencoes', novaManutencao);
-            fecharModalManutencao();
-            renderizarVeiculo();
+            await executarComProgresso('Salvando manutenção', 'Gravando a manutenção no banco...', async (atualizar) => {
+                atualizar(25, 'Gravando o registro...');
+                await putData('manutencoes', novaManutencao);
+                atualizar(90, 'Atualizando a tabela...');
+                fecharModalManutencao();
+                await renderizarVeiculo();
+            });
         }
 
         async function abrirModalDespesaVeiculo() {
@@ -1707,6 +1922,7 @@
 
         async function salvarDespesaVeiculo(e) {
             e.preventDefault();
+            if (operacaoEmAndamento) return;
             const tipo = document.getElementById('dv-tipo').value;
             const descricao = document.getElementById('dv-descricao').value.trim();
             const documento = document.getElementById('dv-documento').value.trim();
@@ -1715,51 +1931,55 @@
             const parcelado = document.getElementById('dv-parcelado').checked;
             const rotulo = descricao ? `${tipo} - ${descricao}` : tipo;
 
-            if (parcelado) {
-                const total = parseFloat(document.getElementById('dv-valor-total').value) || 0;
-                const qtd = parseInt(document.getElementById('dv-qtd-parcelas').value) || 0;
-                if (total <= 0 || qtd <= 0) { alert('Informe o valor total e o número de parcelas.'); return; }
-                const valorParcela = Math.round((total / qtd) * 100) / 100;
-                let acumulado = 0;
-                const agora = Date.now();
-                const parcelas = [];
-                for (let i = 0; i < qtd; i++) {
-                    let valor = valorParcela;
-                    if (i === qtd - 1) valor = Math.round((total - acumulado) * 100) / 100;
-                    acumulado += valor;
-                    parcelas.push({
-                        id: agora + i,
+            await executarComProgresso(parcelado ? 'Salvando parcelas da despesa' : 'Salvando despesa do veículo', 'Gravando os dados no banco...', async (atualizar) => {
+                if (parcelado) {
+                    const total = parseFloat(document.getElementById('dv-valor-total').value) || 0;
+                    const qtd = parseInt(document.getElementById('dv-qtd-parcelas').value) || 0;
+                    if (total <= 0 || qtd <= 0) throw new Error('Informe o valor total e o número de parcelas.');
+                    const valorParcela = Math.round((total / qtd) * 100) / 100;
+                    let acumulado = 0;
+                    const agora = Date.now();
+                    const parcelas = [];
+                    for (let i = 0; i < qtd; i++) {
+                        let valor = valorParcela;
+                        if (i === qtd - 1) valor = Math.round((total - acumulado) * 100) / 100;
+                        acumulado += valor;
+                        parcelas.push({
+                            id: agora + i,
+                            orcamentoNo: documento,
+                            data: somarMeses(dataBase, i),
+                            categoria: categoria,
+                            valor: valor,
+                            peca: `${rotulo} (Parcela ${i + 1}/${qtd})`,
+                            garantia: '',
+                            tipoDespesa: tipo,
+                            parcela: i + 1,
+                            totalParcelas: qtd
+                        });
+                    }
+                    atualizar(35, `Gravando ${qtd} parcela(s)...`);
+                    await putManyData('manutencoes', parcelas);
+                } else {
+                    const valor = parseFloat(document.getElementById('dv-valor').value) || 0;
+                    if (valor <= 0) throw new Error('Informe o valor da despesa.');
+                    atualizar(35, 'Gravando a despesa...');
+                    await putData('manutencoes', {
+                        id: Date.now(),
                         orcamentoNo: documento,
-                        data: somarMeses(dataBase, i),
+                        data: dataBase,
                         categoria: categoria,
                         valor: valor,
-                        peca: `${rotulo} (Parcela ${i + 1}/${qtd})`,
+                        peca: rotulo,
                         garantia: '',
                         tipoDespesa: tipo,
-                        parcela: i + 1,
-                        totalParcelas: qtd
+                        parcela: 1,
+                        totalParcelas: 1
                     });
                 }
-                await putManyData('manutencoes', parcelas);
-            } else {
-                const valor = parseFloat(document.getElementById('dv-valor').value) || 0;
-                if (valor <= 0) { alert('Informe o valor da despesa.'); return; }
-                await putData('manutencoes', {
-                    id: Date.now(),
-                    orcamentoNo: documento,
-                    data: dataBase,
-                    categoria: categoria,
-                    valor: valor,
-                    peca: rotulo,
-                    garantia: '',
-                    tipoDespesa: tipo,
-                    parcela: 1,
-                    totalParcelas: 1
-                });
-            }
-
-            fecharModalDespesaVeiculo();
-            renderizarVeiculo();
+                atualizar(90, 'Atualizando a gestão do veículo...');
+                fecharModalDespesaVeiculo();
+                await renderizarVeiculo();
+            });
         }
 
         function formatarMoedaBR(v) {
@@ -1767,29 +1987,34 @@
         }
 
         async function renderizarVeiculo() {
+            // Garante que o filtro de categorias seja preenchido com os dados
+            // atualmente salvos no banco antes de aplicar o filtro da tabela.
+            await carregarOpcoesCategorias();
+
             const servicos = await getAllData('servicos');
             let manutençoes = await getAllData('manutencoes');
 
-            const busca = document.getElementById('filtro-manutencao-busca').value.toLowerCase();
+            const busca = document.getElementById('filtro-manutencao-busca').value.toLowerCase().trim();
             const categoriasSel = getFiltroCategorias();
             const dataInicio = document.getElementById('filtro-manutencao-data-inicio').value;
             const dataFim = document.getElementById('filtro-manutencao-data-fim').value;
 
             const manutencoesFiltradas = manutençoes.filter(m => {
-                const combinaBusca = (m.peca || '').toLowerCase().includes(busca) || 
+                const combinaBusca = (m.peca || '').toLowerCase().includes(busca) ||
                                      (m.orcamentoNo || '').toLowerCase().includes(busca);
-                const combinaCategoria = categoriasSel.length === 0 || categoriasSel.includes(m.categoria || '');
+                const categoriaRegistro = String(m.categoria ?? '').trim().toLowerCase();
+                const categoriasSelecionadasNormalizadas = categoriasSel.map(c => String(c).trim().toLowerCase());
+                const combinaCategoria = categoriasSel.length === 0 || categoriasSelecionadasNormalizadas.includes(categoriaRegistro);
                 const combinaDataInicio = dataInicio ? m.data >= dataInicio : true;
                 const combinaDataFim = dataFim ? m.data <= dataFim : true;
-
                 return combinaBusca && combinaCategoria && combinaDataInicio && combinaDataFim;
             });
 
             let totalKm = 0;
             let gastoCombustivel = 0;
             let gastoPedagio = 0;
-
             let litrosAbastecidos = 0;
+
             const servicosFiltrados = servicos.filter(s => {
                 const combinaDataInicio = dataInicio ? s.dataServico >= dataInicio : true;
                 const combinaDataFim = dataFim ? s.dataServico <= dataFim : true;
@@ -1802,12 +2027,10 @@
                 litrosAbastecidos += (s.litrosAbast || 0);
             });
 
-            let gastoManutencoes = manutencoesFiltradas.reduce((acc, m) => acc + (m.valor || 0), 0);
-            let totalGasto = gastoCombustivel + gastoPedagio + gastoManutencoes;
-
+            const gastoManutencoes = manutencoesFiltradas.reduce((acc, m) => acc + (m.valor || 0), 0);
+            const totalGasto = gastoCombustivel + gastoPedagio + gastoManutencoes;
             const precoLitro = parseFloat(document.getElementById('precoLitro').value) || 1;
             const totalLitros = litrosAbastecidos > 0 ? litrosAbastecidos : (gastoCombustivel / precoLitro);
-
             const mediaCustoKm = totalKm > 0 ? (totalGasto / totalKm) : 0;
             const mediaKmL = totalLitros > 0 ? (totalKm / totalLitros) : 0;
 
@@ -1819,16 +2042,32 @@
             const elLitros = document.getElementById('totalLitrosAbast');
             if (elLitros) elLitros.innerText = `${totalLitros.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L${litrosAbastecidos > 0 ? '' : ' (estimado)'}`;
 
+            manutencoesFiltradas.sort((a, b) => {
+                const dataA = a.data ? new Date(a.data).getTime() : 0;
+                const dataB = b.data ? new Date(b.data).getTime() : 0;
+                return dataB - dataA || Number(b.id) - Number(a.id);
+            });
+
+            const pageSizeEl = document.getElementById('manutencao-page-size');
+            const pageSize = Math.max(1, parseInt(pageSizeEl?.value || '50', 10));
+            const totalRegistros = manutencoesFiltradas.length;
+            const totalPaginas = Math.max(1, Math.ceil(totalRegistros / pageSize));
+            manutencaoTotalFiltrado = totalRegistros;
+            manutencaoPaginaAtual = Math.min(Math.max(1, manutencaoPaginaAtual), totalPaginas);
+
+            const inicio = (manutencaoPaginaAtual - 1) * pageSize;
+            const paginaAtual = manutencoesFiltradas.slice(inicio, inicio + pageSize);
+
             const tbody = document.getElementById('tabela-manutencao');
             tbody.innerHTML = '';
-            manutencoesFiltradas.forEach(m => {
+            paginaAtual.forEach(m => {
                 tbody.innerHTML += `
                     <tr class="border-b hover:bg-gray-50 transition-colors">
                         <td class="p-3 border col-0">${m.orcamentoNo || ''}</td>
                         <td class="p-3 border col-1">${formatarDataBR(m.data)}</td>
                         <td class="p-3 border col-2"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-semibold">${m.categoria || 'Sem Cat.'}</span></td>
                         <td class="p-3 border col-3">${m.peca || ''}</td>
-                        <td class="p-3 border font-bold col-4">R$ ${(m.valor || 0).toFixed(2)}</td>
+                        <td class="p-3 border font-bold col-4">R$ ${formatarMoedaBR(m.valor)}</td>
                         <td class="p-3 border col-5">${formatarDataBR(m.garantia)}</td>
                         <td class="p-3 border text-center col-6">
                             <button onclick="excluirManutencao(${m.id})" class="text-red-600 hover:text-red-800 p-1" title="Excluir">
@@ -1839,11 +2078,51 @@
                 `;
             });
 
+            atualizarPaginacaoManutencao(totalRegistros, pageSize, totalPaginas);
             initColumnPicker('tabela-manutencao-main', 'col-menu-manutencao');
             lucide.createIcons();
         }
 
+        function atualizarPaginacaoManutencao(total, pageSize, totalPaginas) {
+            const info = document.getElementById('manutencao-paginacao-info');
+            const botoes = document.getElementById('manutencao-paginacao-botoes');
+            if (!info || !botoes) return;
+
+            if (total === 0) {
+                info.innerText = '0 registros';
+                botoes.innerHTML = '';
+                return;
+            }
+
+            const primeiro = ((manutencaoPaginaAtual - 1) * pageSize) + 1;
+            const ultimo = Math.min(manutencaoPaginaAtual * pageSize, total);
+            info.innerText = `Mostrando ${primeiro}-${ultimo} de ${total} registros`;
+
+            const criarBotao = (texto, pagina, disabled = false, ativo = false) => {
+                const acao = disabled ? 'disabled' : `onclick="alterarPaginaManutencao(${pagina})"`;
+                const estilo = ativo ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-100 text-gray-700';
+                return `<button type="button" ${acao} class="px-2.5 py-1 rounded border ${estilo} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}">${texto}</button>`;
+            };
+
+            let html = criarBotao('‹', manutencaoPaginaAtual - 1, manutencaoPaginaAtual <= 1);
+            const maxBotoes = 7;
+            let inicioPagina = Math.max(1, manutencaoPaginaAtual - 3);
+            let fimPagina = Math.min(totalPaginas, inicioPagina + maxBotoes - 1);
+            inicioPagina = Math.max(1, fimPagina - maxBotoes + 1);
+            for (let p = inicioPagina; p <= fimPagina; p++) {
+                html += criarBotao(String(p), p, false, p === manutencaoPaginaAtual);
+            }
+            html += criarBotao('›', manutencaoPaginaAtual + 1, manutencaoPaginaAtual >= totalPaginas);
+            botoes.innerHTML = html;
+        }
+
+        function alterarPaginaManutencao(pagina) {
+            manutencaoPaginaAtual = Math.max(1, Number(pagina) || 1);
+            renderizarVeiculo();
+        }
+
         function limparFiltrosManutencao() {
+            manutencaoPaginaAtual = 1;
             document.getElementById('filtro-manutencao-busca').value = '';
             document.querySelectorAll('#lista-filtro-categorias .chk-filtro-categoria').forEach(c => c.checked = false);
             atualizarLabelFiltroCategorias();
@@ -1851,10 +2130,51 @@
         }
 
         async function excluirManutencao(id) {
-            if(confirm("Excluir esta manutenção?")) {
+            if (operacaoEmAndamento) return;
+            if (!confirm('Excluir esta manutenção?')) return;
+            await executarComProgresso('Excluindo manutenção', 'Removendo o registro do banco...', async (atualizar) => {
+                atualizar(25, 'Excluindo a manutenção...');
                 await deleteData('manutencoes', id);
-                renderizarVeiculo();
+                atualizar(90, 'Atualizando a tabela...');
+                await renderizarVeiculo();
+            });
+        }
+
+        async function excluirManutencoesFiltradas() {
+            if (operacaoEmAndamento) return;
+            const manutençoes = await getAllData('manutencoes');
+            const busca = document.getElementById('filtro-manutencao-busca').value.toLowerCase().trim();
+            const categoriasSel = getFiltroCategorias();
+            const categoriasSelecionadasNormalizadas = categoriasSel.map(c => String(c).trim().toLowerCase());
+            const dataInicio = document.getElementById('filtro-manutencao-data-inicio').value;
+            const dataFim = document.getElementById('filtro-manutencao-data-fim').value;
+
+            const filtradas = manutençoes.filter(m => {
+                const combinaBusca = (m.peca || '').toLowerCase().includes(busca) ||
+                                     (m.orcamentoNo || '').toLowerCase().includes(busca);
+                const categoriaRegistro = String(m.categoria ?? '').trim().toLowerCase();
+                const combinaCategoria = categoriasSel.length === 0 || categoriasSelecionadasNormalizadas.includes(categoriaRegistro);
+                const combinaDataInicio = dataInicio ? m.data >= dataInicio : true;
+                const combinaDataFim = dataFim ? m.data <= dataFim : true;
+                return combinaBusca && combinaCategoria && combinaDataInicio && combinaDataFim;
+            });
+
+            if (filtradas.length === 0) {
+                alert('Nenhuma manutenção encontrada com os filtros atuais.');
+                return;
             }
+            if (!confirm(`ATENÇÃO! Isso excluirá ${filtradas.length} registro(s) de manutenção que atendem aos filtros atuais.\n\nDeseja realmente continuar?`)) return;
+
+            await executarComProgresso('Excluindo registros filtrados', `Preparando a exclusão de ${filtradas.length} registro(s)...`, async (atualizar) => {
+                const total = filtradas.length;
+                for (let i = 0; i < total; i++) {
+                    await deleteData('manutencoes', filtradas[i].id);
+                    const percentual = 20 + ((i + 1) / total) * 70;
+                    atualizar(percentual, `Excluindo registro ${i + 1} de ${total}...`);
+                }
+                manutencaoPaginaAtual = 1;
+                await renderizarVeiculo();
+            });
         }
 
         function limparFiltrosDashboard() {
@@ -1928,9 +2248,18 @@
         }
 
         function filtrarDashboardPorStatus(status) {
+            // O clique no gráfico deve abrir a guia Valores a Receber já filtrada.
             const sel = document.getElementById('filtro-dash-status');
-            sel.value = (sel.value === status) ? 'todos' : status;
-            renderizarDashboard();
+            if (sel) sel.value = status;
+
+            document.querySelectorAll('.chk-receber-status').forEach(chk => {
+                chk.checked = (chk.value === status);
+            });
+
+            // switchTab('receber') já chama renderizarReceber().
+            // Não executar novamente aqui para evitar duas renderizações simultâneas
+            // e a duplicação das linhas na tabela de Valores a Receber.
+            switchTab('receber');
         }
 
         function toggleExpandChart(containerId) {
@@ -2224,13 +2553,14 @@
 
         async function salvarUsuario(e) {
             e.preventDefault();
+            if (operacaoEmAndamento) return;
             const original = document.getElementById('edit-usuario-original').value;
             const nome = document.getElementById('usr-nome').value.trim();
             const senha = document.getElementById('usr-senha').value;
             const isAdmin = document.getElementById('usr-admin').checked;
 
             if (!nome) {
-                alert("Informe o nome de usuário.");
+                alert('Informe o nome de usuário.');
                 return;
             }
 
@@ -2241,37 +2571,61 @@
                 guiasSelecionadas.push('servicos', 'receber', 'veiculo', 'relatorios', 'dashboard', 'usuarios');
             }
 
-            const registroUsuario = {
-                usuario: nome,
-                isAdmin: isAdmin,
-                guias: guiasSelecionadas
-            };
+            const registroUsuario = { usuario: nome, isAdmin, guias: guiasSelecionadas };
+            if (senha) registroUsuario.senhaHash = gerarHashSHA256(senha);
 
-            if (senha) {
-                registroUsuario.senhaHash = gerarHashSHA256(senha);
-            }
+            await executarComProgresso(original ? 'Atualizando usuário' : 'Salvando usuário', 'Gravando as alterações no banco...', async (atualizar) => {
+                if (original && original !== nome) {
+                    atualizar(25, 'Atualizando o nome do usuário...');
+                    await deleteData('usuarios', original);
+                }
+                atualizar(55, 'Salvando as permissões...');
+                await putData('usuarios', registroUsuario);
+                atualizar(90, 'Atualizando a lista de usuários...');
+                fecharModalUsuario();
+                await renderizarUsuarios();
+            });
+        }
 
-            if (original && original !== nome) {
-                await deleteData('usuarios', original);
-            }
+        function configurarNavegacaoEnterFormularios() {
+            const idsFormularios = ['form-servico', 'form-manutencao', 'form-despesa-veiculo'];
+            idsFormularios.forEach(formId => {
+                const form = document.getElementById(formId);
+                if (!form) return;
+                form.addEventListener('keydown', (event) => {
+                    if (event.key !== 'Enter' || event.target.tagName === 'TEXTAREA') return;
+                    event.preventDefault();
+                    event.stopPropagation();
 
-            await putData('usuarios', registroUsuario);
-            fecharModalUsuario();
-            renderizarUsuarios();
+                    const campos = Array.from(form.querySelectorAll('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])'))
+                        .filter(el => el.offsetParent !== null);
+                    const indiceAtual = campos.indexOf(event.target);
+                    if (indiceAtual >= 0 && indiceAtual < campos.length - 1) {
+                        const proximo = campos[indiceAtual + 1];
+                        proximo.focus();
+                        if (proximo.tagName === 'INPUT' && proximo.type === 'text' && typeof proximo.select === 'function') proximo.select();
+                    }
+                }, true);
+            });
         }
 
         async function excluirUsuario(nomeUsuario) {
+            if (operacaoEmAndamento) return;
             if (nomeUsuario === 'admin') {
-                alert("O usuário administrador principal não pode ser excluído.");
+                alert('O usuário administrador principal não pode ser excluído.');
                 return;
             }
-            if (confirm(`Deseja realmente excluir o usuário "${nomeUsuario}"?`)) {
+            if (!confirm(`Deseja realmente excluir o usuário "${nomeUsuario}"?`)) return;
+            await executarComProgresso('Excluindo usuário', 'Removendo o usuário do banco...', async (atualizar) => {
+                atualizar(25, 'Excluindo o usuário...');
                 await deleteData('usuarios', nomeUsuario);
-                renderizarUsuarios();
-            }
+                atualizar(90, 'Atualizando a lista de usuários...');
+                await renderizarUsuarios();
+            });
         }
 
         window.onload = async function() {
+            configurarNavegacaoEnterFormularios();
             try {
                 await initDB();
                 await inicializarUsuarioPadrao();
