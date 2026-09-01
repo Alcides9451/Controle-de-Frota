@@ -230,6 +230,13 @@
                     <input type="date" id="filtro-servico-data-fim" onchange="aplicarDataGlobal('fim', this.value)" class="border rounded p-2 text-sm">
                 </div>
                 <button onclick="limparFiltrosServicos()" class="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm">Limpar Filtros</button>
+
+                <!-- Alcides-->
+                <!-- NOVO BOTÃO -->
+                <button onclick="excluirServicosFiltrados()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded text-sm flex items-center gap-1" title="Excluir todos os registros encontrados pelo filtro">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i> Excluir filtrados
+                </button>
+
                 <div class="relative">
                     <button onclick="toggleColumnMenu('col-menu-servicos')" class="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded text-sm flex items-center gap-1">
                         <i data-lucide="columns" class="w-4 h-4"></i> Colunas
@@ -318,6 +325,13 @@
                     <input type="date" id="filtro-receber-data-fim" onchange="aplicarDataGlobal('fim', this.value)" class="border rounded p-2 text-sm">
                 </div>
                 <button onclick="limparFiltrosReceber()" class="bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded text-sm">Limpar</button>
+
+                <!-- Alcides-->
+                <!-- NOVO BOTÃO -->
+                <button onclick="excluirReceberFiltrados()" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded text-sm flex items-center gap-1" title="Excluir todos os registros encontrados pelo filtro">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i> Excluir filtrados
+                </button>
+
                 <div class="relative">
                     <button onclick="toggleColumnMenu('col-menu-receber')" class="bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded text-sm flex items-center gap-1">
                         <i data-lucide="columns" class="w-4 h-4"></i> Colunas
@@ -828,6 +842,103 @@
 
     <!-- SCRIPT DA APLICAÇÃO -->
     <script>
+
+        <!-- Alcides -->
+        // 1. Função para deletar registros filtrados na guia Serviços Prestados
+        async function excluirServicosFiltrados() {
+            if (operacaoEmAndamento) return;
+
+            let servicos = await getAllData('servicos');
+            const busca = document.getElementById('filtro-servico-busca').value.toLowerCase();
+            const dataInicio = document.getElementById('filtro-servico-data-inicio').value;
+            const dataFim = document.getElementById('filtro-servico-data-fim').value;
+
+            const filtrados = servicos.filter(s => {
+                const combinaBusca = (s.cidade || '').toLowerCase().includes(busca) ||
+                                    (s.regiao || '').toLowerCase().includes(busca) ||
+                                    (s.notaFiscal || '').toLowerCase().includes(busca) ||
+                                    (s.romaneio || '').toLowerCase().includes(busca);
+                const combinaDataInicio = dataInicio ? s.dataServico >= dataInicio : true;
+                const combinaDataFim = dataFim ? s.dataServico <= dataFim : true;
+
+                return combinaBusca && combinaDataInicio && combinaDataFim;
+            });
+
+            if (filtrados.length === 0) {
+                alert('Nenhum registro encontrado com os filtros atuais.');
+                return;
+            }
+
+            if (!confirm(`Tem certeza que deseja excluir TODOS os ${filtrados.length} registro(s) filtrado(s) na guia Serviços Prestados? Esta ação não poderá ser desfeita.`)) {
+                return;
+            }
+
+            await executarComProgresso('Excluindo serviços filtrados', 'Removendo registros...', async (atualizar) => {
+                const total = filtrados.length;
+                for (let i = 0; i < total; i++) {
+                    await deleteData('servicos', filtrados[i].id);
+                    const pct = Math.round(((i + 1) / total) * 90);
+                    atualizar(pct, `Excluindo registro ${i + 1} de ${total}...`);
+                }
+                atualizar(95, 'Atualizando tabelas...');
+                await renderizarServicos();
+                await renderizarReceber();
+            });
+        }
+
+        // 2. Função para deletar registros filtrados na guia Valores a Receber
+        async function excluirReceberFiltrados() {
+            if (operacaoEmAndamento) return;
+
+            let servicos = await getAllData('servicos');
+            const statusSelecionados = Array.from(document.querySelectorAll('.chk-receber-status:checked')).map(c => c.value);
+            const dataInicio = document.getElementById('filtro-receber-data-inicio').value;
+            const dataFim = document.getElementById('filtro-receber-data-fim').value;
+            const busca = document.getElementById('filtro-receber-busca').value.toLowerCase();
+            const hoje = new Date().toISOString().split('T')[0];
+
+            const filtrados = servicos.filter(s => {
+                let status = 'pendente';
+                if (s.dataRecebido) {
+                    status = 'recebido';
+                } else if (s.vencimento < hoje) {
+                    status = 'vencido';
+                }
+
+                const combinaStatus = statusSelecionados.length === 0 || statusSelecionados.includes(status);
+                const combinaDataInicio = dataInicio ? s.dataServico >= dataInicio : true;
+                const combinaDataFim = dataFim ? s.dataServico <= dataFim : true;
+                const combinaBusca = (s.cidade || '').toLowerCase().includes(busca) ||
+                                    (s.regiao || '').toLowerCase().includes(busca) ||
+                                    (s.notaFiscal || '').toLowerCase().includes(busca) ||
+                                    (s.romaneio || '').toLowerCase().includes(busca);
+
+                return combinaStatus && combinaDataInicio && combinaDataFim && combinaBusca;
+            });
+
+            if (filtrados.length === 0) {
+                alert('Nenhum registro encontrado com os filtros atuais.');
+                return;
+            }
+
+            if (!confirm(`Tem certeza que deseja excluir TODOS os ${filtrados.length} registro(s) filtrado(s) em Valores a Receber? Esta ação não poderá ser desfeita.`)) {
+                return;
+            }
+
+            await executarComProgresso('Excluindo registros a receber', 'Removendo registros...', async (atualizar) => {
+                const total = filtrados.length;
+                for (let i = 0; i < total; i++) {
+                    await deleteData('servicos', filtrados[i].id);
+                    const pct = Math.round(((i + 1) / total) * 90);
+                    atualizar(pct, `Excluindo registro ${i + 1} de ${total}...`);
+                }
+                atualizar(95, 'Atualizando tabelas...');
+                await renderizarServicos();
+                await renderizarReceber();
+            });
+        }
+
+
         const DB_NAME = 'GerenciadorFinanceiroDB';
         const DB_VERSION = 5;
         let db = null;
