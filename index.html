@@ -207,6 +207,13 @@
         <button id="btn-sincronizar" onclick="sincronizarAgora()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" title="Enviar as alterações temporárias para o banco do Google Apps Script">
             <i data-lucide="cloud-upload" class="w-4 h-4"></i> Salvar no servidor
         </button>
+        <button onclick="exportarBancoJSON()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm flex items-center gap-2" title="Exportar o banco local em formato JSON">
+            <i data-lucide="download" class="w-4 h-4"></i> Exportar JSON
+        </button>
+        <button onclick="document.getElementById('input-importar-json').click()" class="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm flex items-center gap-2" title="Importar um banco local em formato JSON">
+            <i data-lucide="upload" class="w-4 h-4"></i> Importar JSON
+        </button>
+        <input id="input-importar-json" type="file" accept="application/json,.json" class="hidden" onchange="importarBancoJSON(event)">
     </div>
 
     <!-- CONTEÚDO PRINCIPAL -->
@@ -1482,6 +1489,78 @@
 
         window.addEventListener('pagehide', prepararSincronizacaoAoFechar);
         window.addEventListener('beforeunload', prepararSincronizacaoAoFechar);
+
+        // ===== IMPORTAÇÃO / EXPORTAÇÃO DO BANCO LOCAL EM JSON =====
+        async function exportarBancoJSON() {
+            try {
+                const banco = normalizarBanco({
+                    servicos: await getAllData('servicos'),
+                    manutencoes: await getAllData('manutencoes'),
+                    categorias: await getAllData('categorias'),
+                    usuarios: await getAllData('usuarios')
+                });
+
+                const arquivo = {
+                    formato: 'GerenciadorFinanceiroJSON',
+                    versao: 1,
+                    exportadoEm: new Date().toISOString(),
+                    dados: banco
+                };
+
+                const blob = new Blob([JSON.stringify(arquivo, null, 2)], { type: 'application/json;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                const data = new Date().toISOString().slice(0, 10);
+                a.href = url;
+                a.download = `GerenciadorFinanceiro_${data}.json`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            } catch (erro) {
+                console.error('Erro ao exportar JSON:', erro);
+                alert('Não foi possível exportar os dados em JSON: ' + (erro?.message || erro));
+            }
+        }
+
+        async function importarBancoJSON(event) {
+            const input = event?.target;
+            const arquivo = input?.files?.[0];
+            if (!arquivo) return;
+
+            try {
+                const texto = await arquivo.text();
+                const json = JSON.parse(texto);
+                const dados = json?.dados || json;
+                const banco = normalizarBanco(dados);
+
+                const total = Object.values(banco).reduce((soma, lista) => soma + lista.length, 0);
+                if (total === 0) {
+                    throw new Error('O arquivo JSON não contém registros reconhecíveis do banco.');
+                }
+
+                const confirmou = confirm(`Importar ${total} registro(s) para o banco local?\n\nOs dados atuais do IndexedDB serão substituídos pelos dados deste arquivo. As alterações pendentes de sincronização também serão descartadas.`);
+                if (!confirmou) return;
+
+                await abrirIndexedDB();
+                for (const [storeName, registros] of Object.entries(banco)) {
+                    await idbSalvar(storeName, registros);
+                }
+                await limparFilaSync();
+                DB_CACHE = banco;
+                DB_CARREGADO = true;
+
+                await renderizarTodasGuias();
+                await carregarOpcoesCategorias();
+                await atualizarIndicadorSincronizacao();
+                alert(`Importação concluída com sucesso. ${total} registro(s) foram carregados no banco local.`);
+            } catch (erro) {
+                console.error('Erro ao importar JSON:', erro);
+                alert('Não foi possível importar o arquivo JSON: ' + (erro?.message || erro));
+            } finally {
+                if (input) input.value = '';
+            }
+        }
 
         async function atualizarDadosDoServidor() {
             try {
