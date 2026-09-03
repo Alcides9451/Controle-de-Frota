@@ -201,6 +201,14 @@
         </div>
     </aside>
 
+    <!-- CONTROLE DE SINCRONIZAÇÃO DOS DADOS -->
+    <div id="sincronizacao-barra" class="fixed bottom-4 right-4 z-40 flex items-center gap-2">
+        <span id="sincronizacao-status" class="hidden md:inline-block bg-white border border-slate-200 shadow-lg rounded-lg px-3 py-2 text-xs text-slate-600">0 alterações pendentes</span>
+        <button id="btn-sincronizar" onclick="sincronizarAgora()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" title="Enviar as alterações temporárias para o banco do Google Apps Script">
+            <i data-lucide="cloud-upload" class="w-4 h-4"></i> Salvar no servidor
+        </button>
+    </div>
+
     <!-- CONTEÚDO PRINCIPAL -->
     <main id="main-content" class="flex-1 ml-64 p-6 overflow-y-auto h-full transition-all duration-300">
 
@@ -897,7 +905,7 @@
                 return;
             }
 
-            await executarComProgresso('Excluindo serviços filtrados', 'Removendo registros...', async (atualizar) => {
+            await executarComProgresso('Excluindo serviços filtrados', 'Removendo localmente; o servidor será atualizado depois...', async (atualizar) => {
                 const total = filtrados.length;
                 for (let i = 0; i < total; i++) {
                     await deleteData('servicos', filtrados[i].id);
@@ -949,7 +957,7 @@
                 return;
             }
 
-            await executarComProgresso('Excluindo registros a receber', 'Removendo registros...', async (atualizar) => {
+            await executarComProgresso('Excluindo registros a receber', 'Removendo localmente; o servidor será atualizado depois...', async (atualizar) => {
                 const total = filtrados.length;
                 for (let i = 0; i < total; i++) {
                     await deleteData('servicos', filtrados[i].id);
@@ -964,7 +972,7 @@
 
 
         const DB_NAME = 'GerenciadorFinanceiroDB';
-        const DB_VERSION = 5;
+        const DB_VERSION = 6;
         let db = null;
 
         let chartFinanceiroInstance = null;
@@ -1065,7 +1073,7 @@
 
         const aguardar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-        function iniciarProgresso(titulo, detalhe = 'Enviando dados para o servidor...') {
+        function iniciarProgresso(titulo, detalhe = 'Salvando localmente...') {
             if (operacaoEmAndamento) return false;
             operacaoEmAndamento = true;
 
@@ -1202,9 +1210,194 @@
             DB_CACHE[storeName] = DB_CACHE[storeName].filter(x => String(x[keyName]) !== String(id));
         }
 
+        // ===== BANCO LOCAL (INDEXEDDB) + FILA DE SINCRONIZAÇÃO =====
+        const IDB_META_KEY = 'estado';
+        const IDB_DADOS_STORE = 'dados';
+        const IDB_FILA_STORE = 'filaSync';
+        let IDB_DB = null;
+        let IDB_PRONTO = null;
+        let SINCRONIZANDO = false;
+
+        function abrirIndexedDB() {
+            if (IDB_PRONTO) return IDB_PRONTO;
+            IDB_PRONTO = new Promise((resolve, reject) => {
+                if (!('indexedDB' in window)) {
+                    reject(new Error('Este navegador não oferece suporte ao IndexedDB.'));
+                    return;
+                }
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onupgradeneeded = (event) => {
+                    const banco = event.target.result;
+                    if (!banco.objectStoreNames.contains(IDB_DADOS_STORE)) {
+                        banco.createObjectStore(IDB_DADOS_STORE, { keyPath: 'storeName' });
+                    }
+                    if (!banco.objectStoreNames.contains(IDB_FILA_STORE)) {
+                        const fila = banco.createObjectStore(IDB_FILA_STORE, { keyPath: 'seq', autoIncrement: true });
+                        fila.createIndex('criadoEm', 'criadoEm', { unique: false });
+                    }
+                };
+                request.onsuccess = () => {
+                    IDB_DB = request.result;
+                    IDB_DB.onversionchange = () => IDB_DB.close();
+                    resolve(IDB_DB);
+                };
+                request.onerror = () => reject(request.error || new Error('Falha ao abrir o IndexedDB.'));
+            });
+            return IDB_PRONTO;
+        }
+
+        function idbTransacao(storeName, mode, acao) {
+            return abrirIndexedDB().then(dbLocal => new Promise((resolve, reject) => {
+                const tx = dbLocal.transaction(storeName, mode);
+                const store = tx.objectStore(storeName);
+                let resultado;
+                try { resultado = acao(store); } catch (erro) { reject(erro); return; }
+                tx.oncomplete = () => resolve(resultado);
+                tx.onerror = () => reject(tx.error || new Error('Erro no IndexedDB.'));
+                tx.onabort = () => reject(tx.error || new Error('Transação abortada no IndexedDB.'));
+            }));
+        }
+
+        async function idbObter(key) {
+            await abrirIndexedDB();
+            return new Promise((resolve, reject) => {
+                const tx = IDB_DB.transaction(IDB_DADOS_STORE, 'readonly');
+                const req = tx.objectStore(IDB_DADOS_STORE).get(key);
+                req.onsuccess = () => resolve(req.result?.data ?? null);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function idbSalvar(storeName, dados) {
+            await idbTransacao(IDB_DADOS_STORE, 'readwrite', store => {
+                store.put({ storeName, data: Array.isArray(dados) ? dados : [] });
+            });
+        }
+
+        async function idbObterFila() {
+            await abrirIndexedDB();
+            return new Promise((resolve, reject) => {
+                const lista = [];
+                const tx = IDB_DB.transaction(IDB_FILA_STORE, 'readonly');
+                const req = tx.objectStore(IDB_FILA_STORE).openCursor();
+                req.onsuccess = (e) => {
+                    const cursor = e.target.result;
+                    if (cursor) { lista.push(cursor.value); cursor.continue(); }
+                    else resolve(lista);
+                };
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function idbAdicionarFila(item) {
+            await idbTransacao(IDB_FILA_STORE, 'readwrite', store => {
+                store.add({ ...item, criadoEm: Date.now() });
+            });
+            atualizarIndicadorSincronizacao();
+        }
+
+        async function idbExcluirFila(seq) {
+            await idbTransacao(IDB_FILA_STORE, 'readwrite', store => store.delete(seq));
+        }
+
+        async function limparFilaSync() {
+            await idbTransacao(IDB_FILA_STORE, 'readwrite', store => store.clear());
+            atualizarIndicadorSincronizacao();
+        }
+
+        async function contarPendenciasSync() {
+            await abrirIndexedDB();
+            return new Promise((resolve, reject) => {
+                const tx = IDB_DB.transaction(IDB_FILA_STORE, 'readonly');
+                const req = tx.objectStore(IDB_FILA_STORE).count();
+                req.onsuccess = () => resolve(req.result || 0);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function atualizarIndicadorSincronizacao() {
+            try {
+                const qtd = await contarPendenciasSync();
+                const status = document.getElementById('sincronizacao-status');
+                const botao = document.getElementById('btn-sincronizar');
+                if (status) status.textContent = qtd === 0 ? 'Tudo salvo no servidor' : `${qtd} alteração(ões) pendente(s)`;
+                if (status) status.classList.toggle('text-amber-600', qtd > 0);
+                if (botao) botao.disabled = qtd === 0 || SINCRONIZANDO;
+            } catch (erro) {
+                console.warn('Indicador de sincronização:', erro);
+            }
+        }
+
+        async function salvarSnapshotLocalCompleto(data) {
+            const base = normalizarBanco(data);
+            for (const [storeName, registros] of Object.entries(base)) await idbSalvar(storeName, registros);
+            await idbTransacao(IDB_DADOS_STORE, 'readwrite', store => {
+                store.put({ storeName: IDB_META_KEY, data: { inicializado: true, atualizadoEm: Date.now() } });
+            });
+            DB_CACHE = base;
+            DB_CARREGADO = true;
+        }
+
+        async function carregarDoIndexedDB() {
+            const meta = await idbObter(IDB_META_KEY);
+            if (!meta?.inicializado) return false;
+            const base = normalizarBanco({
+                servicos: await idbObter('servicos'),
+                manutencoes: await idbObter('manutencoes'),
+                categorias: await idbObter('categorias'),
+                usuarios: await idbObter('usuarios')
+            });
+            DB_CACHE = base;
+            DB_CARREGADO = true;
+            return true;
+        }
+
+        async function carregarBancoCompleto(force = false) {
+            if (DB_CARREGADO && !force) return DB_CACHE;
+            if (DB_CARREGANDO && !force) return DB_CARREGANDO;
+
+            DB_CARREGANDO = (async () => {
+                await abrirIndexedDB();
+                const carregouLocal = await carregarDoIndexedDB();
+                // Primeiro entrega ao usuário os dados locais. Se não houver cache inicial
+                // ou se for solicitada uma atualização explícita, busca apenas o snapshot
+                // do servidor. NUNCA sincroniza alterações pendentes automaticamente.
+                if (!carregouLocal || force) {
+                    const resposta = await apiGet({ action: 'getDb' });
+                    await salvarSnapshotLocalCompleto(resposta.data || {});
+                }
+                return DB_CACHE;
+            })();
+
+            try { return await DB_CARREGANDO; }
+            finally { DB_CARREGANDO = null; }
+        }
+
+        function atualizarCacheAposSalvar(storeName, registro) {
+            if (!DB_CACHE[storeName]) DB_CACHE[storeName] = [];
+            const keyName = storeName === 'usuarios' ? 'usuario' : 'id';
+            const idx = DB_CACHE[storeName].findIndex(x => String(x[keyName]) === String(registro[keyName]));
+
+            const pronto = storeName === 'usuarios'
+                ? { ...registro, usuario: registro.usuario, isAdmin: !!registro.isAdmin, guias: Array.isArray(registro.guias) ? registro.guias : [] }
+                : registro;
+
+            if (idx >= 0) DB_CACHE[storeName][idx] = pronto;
+            else DB_CACHE[storeName].push(pronto);
+            return pronto;
+        }
+
+        function atualizarCacheAposExcluir(storeName, id) {
+            if (!DB_CACHE[storeName]) return;
+            const keyName = storeName === 'usuarios' ? 'usuario' : 'id';
+            DB_CACHE[storeName] = DB_CACHE[storeName].filter(x => String(x[keyName]) !== String(id));
+        }
+
         async function initDB() {
+            await abrirIndexedDB();
             await carregarBancoCompleto();
-            return { remoto: true };
+            await atualizarIndicadorSincronizacao();
+            return { remoto: false, local: true };
         }
 
         async function getAllData(storeName) {
@@ -1213,30 +1406,89 @@
         }
 
         async function putData(storeName, data) {
-            const resposta = await apiPost({ action: 'put', store: storeName, data });
-            const salvo = resposta.data;
-            atualizarCacheAposSalvar(storeName, salvo);
-            return salvo;
+            const pronto = atualizarCacheAposSalvar(storeName, data);
+            await idbSalvar(storeName, DB_CACHE[storeName]);
+            await idbAdicionarFila({ action: 'put', store: storeName, data: pronto });
+            return pronto;
         }
 
         async function putManyData(storeName, registros) {
             if (!Array.isArray(registros) || registros.length === 0) return [];
-            const resposta = await apiPost({ action: 'putMany', store: storeName, data: registros });
-            const salvos = Array.isArray(resposta.data) ? resposta.data : [];
-            salvos.forEach(registro => atualizarCacheAposSalvar(storeName, registro));
+            const salvos = registros.map(registro => atualizarCacheAposSalvar(storeName, registro));
+            await idbSalvar(storeName, DB_CACHE[storeName]);
+            await idbAdicionarFila({ action: 'putMany', store: storeName, data: salvos });
             return salvos;
         }
 
         async function deleteData(storeName, id) {
-            await apiPost({ action: 'delete', store: storeName, id });
             atualizarCacheAposExcluir(storeName, id);
+            await idbSalvar(storeName, DB_CACHE[storeName]);
+            await idbAdicionarFila({ action: 'delete', store: storeName, id });
             return true;
         }
 
+        async function sincronizarFila({ silencioso = false } = {}) {
+            if (SINCRONIZANDO) return false;
+            const fila = await idbObterFila();
+            if (!fila.length) { atualizarIndicadorSincronizacao(); return true; }
+            SINCRONIZANDO = true;
+            const botao = document.getElementById('btn-sincronizar');
+            if (botao) botao.disabled = true;
+            try {
+                validarApiConfigurada();
+                for (let i = 0; i < fila.length; i++) {
+                    await apiPost(fila[i]);
+                    await idbExcluirFila(fila[i].seq);
+                }
+                atualizarIndicadorSincronizacao();
+                if (!silencioso) alert(`${fila.length} alteração(ões) salvas no Google Apps Script.`);
+                return true;
+            } catch (erro) {
+                console.error('Falha na sincronização:', erro);
+                atualizarIndicadorSincronizacao();
+                if (!silencioso) alert('As alterações continuam guardadas no IndexedDB. Não foi possível sincronizar agora: ' + (erro?.message || erro));
+                return false;
+            } finally {
+                SINCRONIZANDO = false;
+                atualizarIndicadorSincronizacao();
+            }
+        }
+
+        async function sincronizarAgora() {
+            if (operacaoEmAndamento || SINCRONIZANDO) return;
+            await executarComProgresso('Salvando alterações no servidor', 'Enviando as alterações acumuladas...', async (atualizar) => {
+                atualizar(15, 'Lendo a fila local...');
+                const ok = await sincronizarFila({ silencioso: true });
+                if (!ok) throw new Error('Não foi possível concluir a sincronização.');
+                atualizar(90, 'Atualizando as telas...');
+                await renderizarTodasGuias();
+            });
+        }
+
+        function prepararSincronizacaoAoFechar() {
+            // O pagehide é a última oportunidade confiável para disparar a fila sem bloquear a saída.
+            try {
+                if (!navigator.sendBeacon || !API_URL) return;
+                idbObterFila().then(fila => {
+                    fila.forEach(item => {
+                        try {
+                            const pacote = JSON.stringify(item);
+                            navigator.sendBeacon(API_URL, new Blob([pacote], { type: 'text/plain;charset=utf-8' }));
+                        } catch (erro) { console.warn('Não foi possível enviar pendência no fechamento:', erro); }
+                    });
+                }).catch(() => {});
+            } catch (erro) { console.warn('Sincronização no fechamento:', erro); }
+        }
+
+        window.addEventListener('pagehide', prepararSincronizacaoAoFechar);
+        window.addEventListener('beforeunload', prepararSincronizacaoAoFechar);
+
         async function atualizarDadosDoServidor() {
             try {
+                await sincronizarFila({ silencioso: true });
+                DB_CARREGADO = false;
                 await carregarBancoCompleto(true);
-                renderizarTodasGuias();
+                await renderizarTodasGuias();
                 await carregarOpcoesCategorias();
                 alert('Dados atualizados com sucesso.');
             } catch (erro) {
@@ -1268,11 +1520,36 @@
             const pass = document.getElementById('login-senha').value;
             const passHash = gerarHashSHA256(pass);
 
+            if (!user || !pass) return;
+
             try {
-                const resposta = await apiPost({ action: 'login', usuario: user, senhaHash: passHash });
+                // A autenticação continua sendo validada pelo Google Apps Script.
+                // O IndexedDB não substitui a validação do servidor; ele é usado
+                // depois do login para manter a sessão e o funcionamento local.
+                const resposta = await apiPost({
+                    action: 'login',
+                    usuario: user,
+                    senhaHash: passHash
+                });
+
                 const usuarioEncontrado = resposta.ok ? resposta.data : null;
 
                 if (usuarioEncontrado) {
+                    // Guarda localmente os dados mínimos necessários para a sessão.
+                    // Incluímos o hash digitado SOMENTE no cache local para permitir
+                    // eventual autenticação offline; nunca enviamos um novo payload
+                    // de usuário ao servidor nessa etapa.
+                    const usuarioLocal = {
+                        ...usuarioEncontrado,
+                        usuario: usuarioEncontrado.usuario || user,
+                        senhaHash: usuarioEncontrado.senhaHash || passHash,
+                        isAdmin: !!usuarioEncontrado.isAdmin,
+                        guias: Array.isArray(usuarioEncontrado.guias) ? usuarioEncontrado.guias : []
+                    };
+
+                    atualizarCacheAposSalvar('usuarios', usuarioLocal);
+                    await idbSalvar('usuarios', DB_CACHE.usuarios);
+
                     sessionStorage.setItem('usuarioAutenticado', user);
                     document.getElementById('modal-login').classList.add('hidden');
                     document.getElementById('form-login').reset();
@@ -1280,10 +1557,12 @@
                     await verificarAutenticacao();
                 } else {
                     document.getElementById('login-erro').classList.remove('hidden');
+                    document.getElementById('login-erro').textContent = 'Usuário ou senha inválidos.';
                 }
             } catch (erro) {
-                console.error(erro);
-                alert('Não foi possível acessar o servidor. Verifique a configuração do Google Apps Script.');
+                console.error('Erro de autenticação:', erro);
+                document.getElementById('login-erro').classList.add('hidden');
+                alert('Não foi possível autenticar no servidor. Verifique a conexão com o Google Apps Script.');
             }
         }
 
@@ -1333,10 +1612,20 @@
             }
         }
 
-        function fazerLogout() {
-            sessionStorage.removeItem('usuarioAutenticado');
-            usuarioAtualObjeto = null;
-            verificarAutenticacao();
+        async function fazerLogout() {
+            try {
+                const pendencias = await contarPendenciasSync();
+                if (pendencias > 0) {
+                    const ok = confirm(`Existem ${pendencias} alteração(ões) pendente(s). Deseja salvar no servidor antes de sair?`);
+                    if (ok) await sincronizarAgora();
+                }
+            } catch (erro) {
+                console.warn('Não foi possível verificar/sincronizar ao sair:', erro);
+            } finally {
+                sessionStorage.removeItem('usuarioAutenticado');
+                usuarioAtualObjeto = null;
+                document.getElementById('modal-login').classList.remove('hidden');
+            }
         }
 
         function limparFiltrosRelatorio() {
@@ -1529,9 +1818,10 @@
 
         function abrirModalServico() { document.getElementById('modal-servico').classList.remove('hidden'); }
         function fecharModalServico() { document.getElementById('modal-servico').classList.add('hidden'); limparFormularioServico(); }
-        async function abrirModalManutencao() { 
-            await carregarOpcoesCategorias();
-            document.getElementById('modal-manutencao').classList.remove('hidden'); 
+        function abrirModalManutencao() {
+            // Abre imediatamente. As categorias já devem estar no cache local.
+            document.getElementById('modal-manutencao').classList.remove('hidden');
+            carregarOpcoesCategorias().catch(err => console.warn('Categorias locais:', err));
         }
         function fecharModalManutencao() { document.getElementById('modal-manutencao').classList.add('hidden'); document.getElementById('form-manutencao').reset(); }
         
@@ -1605,7 +1895,7 @@
             };
 
             const titulo = id ? 'Atualizando lançamento' : 'Salvando novo lançamento';
-            await executarComProgresso(titulo, 'Gravando os dados no banco...', async (atualizar) => {
+            await executarComProgresso(titulo, 'Salvando localmente; o servidor será atualizado depois...', async (atualizar) => {
                 atualizar(20, 'Validando os dados...');
                 await putData('servicos', novoServico);
                 atualizar(92, 'Atualizando a tela...');
@@ -1728,7 +2018,7 @@
         async function excluirServico(id) {
             if (operacaoEmAndamento) return;
             if (!confirm('Tem certeza que deseja excluir este serviço?')) return;
-            await executarComProgresso('Excluindo lançamento', 'Removendo o registro do banco...', async (atualizar) => {
+            await executarComProgresso('Excluindo lançamento', 'Removendo localmente; o servidor será atualizado depois...', async (atualizar) => {
                 atualizar(25, 'Excluindo o registro...');
                 await deleteData('servicos', id);
                 atualizar(92, 'Atualizando a tabela...');
@@ -1877,7 +2167,7 @@
             const input = document.getElementById('nomeCategoria');
             const nome = input.value.trim();
             if (!nome) return;
-            await executarComProgresso('Salvando categoria', 'Gravando a nova categoria no banco...', async (atualizar) => {
+            await executarComProgresso('Salvando categoria', 'Salvando localmente; o servidor será atualizado depois...', async (atualizar) => {
                 atualizar(25, 'Gravando a categoria...');
                 await putData('categorias', { id: Date.now(), nome });
                 atualizar(90, 'Atualizando as categorias...');
@@ -1908,7 +2198,7 @@
         async function excluirCategoria(id) {
             if (operacaoEmAndamento) return;
             if (!confirm('Deseja excluir esta categoria?')) return;
-            await executarComProgresso('Excluindo categoria', 'Removendo a categoria do banco...', async (atualizar) => {
+            await executarComProgresso('Excluindo categoria', 'Removendo localmente; o servidor será atualizado depois...', async (atualizar) => {
                 atualizar(25, 'Excluindo a categoria...');
                 await deleteData('categorias', id);
                 atualizar(90, 'Atualizando a lista de categorias...');
@@ -1919,19 +2209,9 @@
         }
 
         async function obterCategoriasDisponiveis() {
-            // Primeiro usa o cache já carregado. Se não houver categorias,
-            // força uma atualização do banco remoto para garantir que o
-            // filtro reflita o que realmente está salvo no Google Apps Script.
-            let categoriasBanco = await getAllData('categorias');
-
-            if (!categoriasBanco.length) {
-                try {
-                    await carregarBancoCompleto(true);
-                    categoriasBanco = await getAllData('categorias');
-                } catch (erro) {
-                    console.warn('Não foi possível atualizar as categorias do servidor:', erro);
-                }
-            }
+            // A abertura dos formulários usa somente o cache local/IndexedDB.
+            // Não consulta nem sincroniza o servidor nessa etapa.
+            const categoriasBanco = await getAllData('categorias');
 
             const mapa = new Map();
 
@@ -2037,7 +2317,7 @@
                 peca: document.getElementById('pecaTrocada').value,
                 garantia: document.getElementById('dataGarantia').value
             };
-            await executarComProgresso('Salvando manutenção', 'Gravando a manutenção no banco...', async (atualizar) => {
+            await executarComProgresso('Salvando manutenção', 'Salvando localmente; o servidor será atualizado depois...', async (atualizar) => {
                 atualizar(25, 'Gravando o registro...');
                 await putData('manutencoes', novaManutencao);
                 atualizar(90, 'Atualizando a tabela...');
@@ -2046,13 +2326,15 @@
             });
         }
 
-        async function abrirModalDespesaVeiculo() {
-            await carregarOpcoesCategorias();
-            const selCat = document.getElementById('dv-categoria');
-            const selOrigem = document.getElementById('categoriaManutencao');
-            if (selCat && selOrigem) selCat.innerHTML = selOrigem.innerHTML;
+        function abrirModalDespesaVeiculo() {
+            // Abre imediatamente, sem esperar rede.
             document.getElementById('modal-despesa-veiculo').classList.remove('hidden');
             toggleParcelamentoDespesa();
+            carregarOpcoesCategorias().then(() => {
+                const selCat = document.getElementById('dv-categoria');
+                const selOrigem = document.getElementById('categoriaManutencao');
+                if (selCat && selOrigem) selCat.innerHTML = selOrigem.innerHTML;
+            }).catch(err => console.warn('Categorias locais:', err));
         }
 
         function fecharModalDespesaVeiculo() {
@@ -2097,7 +2379,7 @@
             const parcelado = document.getElementById('dv-parcelado').checked;
             const rotulo = descricao ? `${tipo} - ${descricao}` : tipo;
 
-            await executarComProgresso(parcelado ? 'Salvando parcelas da despesa' : 'Salvando despesa do veículo', 'Gravando os dados no banco...', async (atualizar) => {
+            await executarComProgresso(parcelado ? 'Salvando parcelas da despesa' : 'Salvando despesa do veículo', 'Salvando localmente; o servidor será atualizado depois...', async (atualizar) => {
                 if (parcelado) {
                     const total = parseFloat(document.getElementById('dv-valor-total').value) || 0;
                     const qtd = parseInt(document.getElementById('dv-qtd-parcelas').value) || 0;
@@ -2349,7 +2631,7 @@
         async function excluirManutencao(id) {
             if (operacaoEmAndamento) return;
             if (!confirm('Excluir esta manutenção?')) return;
-            await executarComProgresso('Excluindo manutenção', 'Removendo o registro do banco...', async (atualizar) => {
+            await executarComProgresso('Excluindo manutenção', 'Removendo localmente; o servidor será atualizado depois...', async (atualizar) => {
                 atualizar(25, 'Excluindo a manutenção...');
                 await deleteData('manutencoes', id);
                 atualizar(90, 'Atualizando a tabela...');
@@ -2848,6 +3130,7 @@
                 await inicializarUsuarioPadrao();
                 await verificarAutenticacao();
                 lucide.createIcons();
+                await atualizarIndicadorSincronizacao();
             } catch (err) {
                 console.error("Erro ao inicializar:", err);
             }
