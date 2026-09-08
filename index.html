@@ -63,6 +63,10 @@
         #op-barra { transition: width .25s ease; }
         #op-icone { font-size: 2.2rem; line-height: 1; }
 
+        /* Barra flutuante de dados: recolhida nao cobre a paginacao */
+        #sincronizacao-barra.barra-recolhida #sincronizacao-acoes { display: none; }
+        #main-content { padding-bottom: 7rem; }
+
         /* ===== RESPONSIVIDADE (Computador / Celular) ===== */
         #mobile-topbar { display: none; }
         #sidebar-overlay { display: none; }
@@ -202,7 +206,12 @@
     </aside>
 
     <!-- CONTROLE DE SINCRONIZAÇÃO DOS DADOS -->
-    <div id="sincronizacao-barra" class="fixed bottom-4 right-4 z-40 flex items-center gap-2">
+    <div id="sincronizacao-barra" class="fixed bottom-4 right-4 z-40 flex items-center gap-2 barra-recolhida">
+        <button id="btn-toggle-sincronizacao" type="button" onclick="toggleBarraSincronizacao()" class="bg-slate-800 hover:bg-slate-900 text-white w-11 h-11 rounded-full shadow-lg flex items-center justify-center relative" title="Mostrar/ocultar ações de dados">
+            <i data-lucide="settings" class="w-5 h-5"></i>
+            <span id="sincronizacao-badge" class="hidden absolute -top-1 -right-1 bg-amber-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">0</span>
+        </button>
+        <div id="sincronizacao-acoes" class="flex flex-wrap items-center justify-end gap-2">
         <span id="sincronizacao-status" class="hidden md:inline-block bg-white border border-slate-200 shadow-lg rounded-lg px-3 py-2 text-xs text-slate-600">0 alterações pendentes</span>
         <button id="btn-sincronizar" onclick="sincronizarAgora()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" title="Enviar as alterações temporárias para o banco do Google Apps Script">
             <i data-lucide="cloud-upload" class="w-4 h-4"></i> Salvar no servidor
@@ -213,6 +222,7 @@
         <button onclick="document.getElementById('input-importar-json').click()" class="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm flex items-center gap-2" title="Importar um banco local em formato JSON">
             <i data-lucide="upload" class="w-4 h-4"></i> Importar JSON
         </button>
+        </div>
         <input id="input-importar-json" type="file" accept="application/json,.json" class="hidden" onchange="importarBancoJSON(event)">
     </div>
 
@@ -492,6 +502,9 @@
                     </button>
                     <div id="col-menu-manutencao" class="hidden absolute right-0 mt-2 bg-white border rounded shadow-lg p-3 z-30 min-w-[180px]"></div>
                 </div>
+                <button onclick="darBaixaContasFiltradas()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded text-sm flex items-center gap-1" title="Dar baixa (marcar como pagas) nas contas lançadas conforme os filtros aplicados">
+                    <i data-lucide="check-circle" class="w-4 h-4"></i> Dar baixa nas contas
+                </button>
             </div>
 
             <!-- Tabela Manutenção -->
@@ -505,7 +518,8 @@
                             <th class="p-3 border col-3">Peça / Serviço</th>
                             <th class="p-3 border col-4">Valor</th>
                             <th class="p-3 border col-5">Garantia</th>
-                            <th class="p-3 border text-center col-6">Ações</th>
+                            <th class="p-3 border col-6">Pagamento</th>
+                            <th class="p-3 border text-center col-7">Ações</th>
                         </tr>
                     </thead>
                     <tbody id="tabela-manutencao"></tbody>
@@ -1328,6 +1342,11 @@
                 const status = document.getElementById('sincronizacao-status');
                 const botao = document.getElementById('btn-sincronizar');
                 if (status) status.textContent = qtd === 0 ? 'Tudo salvo no servidor' : `${qtd} alteração(ões) pendente(s)`;
+                const badge = document.getElementById('sincronizacao-badge');
+                if (badge) {
+                    badge.textContent = qtd > 99 ? '99+' : String(qtd);
+                    badge.classList.toggle('hidden', qtd === 0);
+                }
                 if (status) status.classList.toggle('text-amber-600', qtd > 0);
                 if (botao) botao.disabled = qtd === 0 || SINCRONIZANDO;
             } catch (erro) {
@@ -2509,6 +2528,94 @@
             });
         }
 
+        (function restaurarBarraSincronizacao() {
+            document.addEventListener('DOMContentLoaded', () => {
+                try {
+                    const barra = document.getElementById('sincronizacao-barra');
+                    if (barra && localStorage.getItem('barraDadosRecolhida') === '0') barra.classList.remove('barra-recolhida');
+                } catch (e) {}
+            });
+        })();
+
+        function toggleBarraSincronizacao() {
+            const barra = document.getElementById('sincronizacao-barra');
+            if (!barra) return;
+            barra.classList.toggle('barra-recolhida');
+            try { localStorage.setItem('barraDadosRecolhida', barra.classList.contains('barra-recolhida') ? '1' : '0'); } catch (e) {}
+        }
+
+        async function obterManutencoesFiltradasAtuais() {
+            const manutencoes = await getAllData('manutencoes');
+            const busca = (document.getElementById('filtro-manutencao-busca')?.value || '').toLowerCase().trim();
+            const categoriasSel = getFiltroCategorias();
+            const dataInicio = document.getElementById('filtro-manutencao-data-inicio')?.value || '';
+            const dataFim = document.getElementById('filtro-manutencao-data-fim')?.value || '';
+            const categoriasNorm = categoriasSel.map(c => String(c).trim().toLowerCase());
+            return manutencoes.filter(m => {
+                const combinaBusca = (m.peca || '').toLowerCase().includes(busca) ||
+                                     (m.orcamentoNo || '').toLowerCase().includes(busca);
+                const cat = String(m.categoria ?? '').trim().toLowerCase();
+                const combinaCategoria = categoriasSel.length === 0 || categoriasNorm.includes(cat);
+                const combinaInicio = dataInicio ? m.data >= dataInicio : true;
+                const combinaFim = dataFim ? m.data <= dataFim : true;
+                return combinaBusca && combinaCategoria && combinaInicio && combinaFim;
+            }).sort((a, b) => {
+                const dataA = a.data ? new Date(a.data).getTime() : 0;
+                const dataB = b.data ? new Date(b.data).getTime() : 0;
+                return dataB - dataA || Number(b.id) - Number(a.id);
+            });
+        }
+
+        function lerDataPagamentoBR(mensagem) {
+            const hoje = new Date();
+            const dataHojeBR = `${String(hoje.getDate()).padStart(2, '0')}/${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
+            const entrada = prompt(mensagem, dataHojeBR);
+            if (entrada === null) return null;
+            const partes = entrada.trim().split('/');
+            if (partes.length !== 3 || partes[0].length !== 2 || partes[1].length !== 2 || partes[2].length !== 4) {
+                alert('Data de pagamento inv\u00e1lida. Utilize o formato DD/MM/AAAA.');
+                return null;
+            }
+            return `${partes[2]}-${partes[1]}-${partes[0]}`;
+        }
+
+        async function darBaixaManutencao(id) {
+            if (operacaoEmAndamento) return;
+            const dataISO = lerDataPagamentoBR('Informe a data do pagamento (DD/MM/AAAA):');
+            if (!dataISO) return;
+            const manutencoes = await getAllData('manutencoes');
+            const m = manutencoes.find(item => item.id === id);
+            if (!m) return;
+            m.dataPagamento = dataISO;
+            await executarComProgresso('Registrando pagamento', 'Salvando a baixa no banco...', async (atualizar) => {
+                atualizar(25, 'Atualizando a conta...');
+                await putData('manutencoes', m);
+                atualizar(92, 'Atualizando a tabela...');
+                await renderizarVeiculo();
+            });
+        }
+
+        async function darBaixaContasFiltradas() {
+            if (operacaoEmAndamento) return;
+            const lista = (await obterManutencoesFiltradasAtuais()).filter(m => !m.dataPagamento);
+            if (lista.length === 0) {
+                alert('Nenhuma conta em aberto encontrada com os filtros aplicados.');
+                return;
+            }
+            if (!confirm(`Dar baixa em ${lista.length} conta(s) em aberto?`)) return;
+            const dataISO = lerDataPagamentoBR('Informe a data do pagamento (DD/MM/AAAA):');
+            if (!dataISO) return;
+            await executarComProgresso('Registrando pagamentos', 'Salvando as baixas no banco...', async (atualizar) => {
+                for (let i = 0; i < lista.length; i++) {
+                    lista[i].dataPagamento = dataISO;
+                    await putData('manutencoes', lista[i]);
+                    atualizar(Math.round(((i + 1) / lista.length) * 90), `Baixando ${i + 1} de ${lista.length}...`);
+                }
+                atualizar(95, 'Atualizando a tabela...');
+                await renderizarVeiculo();
+            });
+        }
+
         function formatarMoedaBR(v) {
             return (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
@@ -2596,7 +2703,10 @@
                         <td class="p-3 border col-3">${m.peca || ''}</td>
                         <td class="p-3 border font-bold col-4">R$ ${formatarMoedaBR(m.valor)}</td>
                         <td class="p-3 border col-5">${formatarDataBR(m.garantia)}</td>
-                        <td class="p-3 border text-center col-6">
+                        <td class="p-3 border col-6">${m.dataPagamento
+                            ? `<span class="text-green-700 font-semibold">Pago em ${formatarDataBR(m.dataPagamento)}</span>`
+                            : `<button onclick="darBaixaManutencao(${m.id})" class="bg-green-600 hover:bg-green-700 text-white px-2.5 py-1 rounded-md text-xs font-bold inline-flex items-center gap-1"><i data-lucide="check-circle" class="w-3.5 h-3.5"></i> Dar Baixa</button>`}</td>
+                        <td class="p-3 border text-center col-7">
                             <button onclick="excluirManutencao(${m.id})" class="text-red-600 hover:text-red-800 p-1" title="Excluir">
                                 <i data-lucide="trash-2" class="w-4 h-4"></i>
                             </button>
