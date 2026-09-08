@@ -477,6 +477,14 @@
                     </div>
                 </div>
                 <div>
+                    <label class="block text-xs font-semibold text-gray-600">Situação da Conta</label>
+                    <select id="filtro-manutencao-pagamento" onchange="manutencaoPaginaAtual=1; agendarRenderizacao('veiculo')" class="border rounded p-2 text-sm bg-white">
+                        <option value="">Todas</option>
+                        <option value="pendente">Pendentes</option>
+                        <option value="paga">Pagas</option>
+                    </select>
+                </div>
+                <div>
                     <label class="block text-xs font-semibold text-gray-600">Data Inicial</label>
                     <input type="date" id="filtro-manutencao-data-inicio" onchange="aplicarDataGlobal('inicio', this.value)" class="border rounded p-2 text-sm">
                 </div>
@@ -2544,6 +2552,16 @@
             try { localStorage.setItem('barraDadosRecolhida', barra.classList.contains('barra-recolhida') ? '1' : '0'); } catch (e) {}
         }
 
+        function getFiltroPagamento() {
+            return document.getElementById('filtro-manutencao-pagamento')?.value || '';
+        }
+
+        function combinaSituacaoPagamento(m, situacao) {
+            if (!situacao) return true;
+            const pago = !!m.dataPagamento;
+            return situacao === 'paga' ? pago : !pago;
+        }
+
         async function obterManutencoesFiltradasAtuais() {
             const manutencoes = await getAllData('manutencoes');
             const busca = (document.getElementById('filtro-manutencao-busca')?.value || '').toLowerCase().trim();
@@ -2558,7 +2576,7 @@
                 const combinaCategoria = categoriasSel.length === 0 || categoriasNorm.includes(cat);
                 const combinaInicio = dataInicio ? m.data >= dataInicio : true;
                 const combinaFim = dataFim ? m.data <= dataFim : true;
-                return combinaBusca && combinaCategoria && combinaInicio && combinaFim;
+                return combinaBusca && combinaCategoria && combinaInicio && combinaFim && combinaSituacaoPagamento(m, getFiltroPagamento());
             }).sort((a, b) => {
                 const dataA = a.data ? new Date(a.data).getTime() : 0;
                 const dataB = b.data ? new Date(b.data).getTime() : 0;
@@ -2641,7 +2659,7 @@
                 const combinaCategoria = categoriasSel.length === 0 || categoriasSelecionadasNormalizadas.includes(categoriaRegistro);
                 const combinaDataInicio = dataInicio ? m.data >= dataInicio : true;
                 const combinaDataFim = dataFim ? m.data <= dataFim : true;
-                return combinaBusca && combinaCategoria && combinaDataInicio && combinaDataFim;
+                return combinaBusca && combinaCategoria && combinaDataInicio && combinaDataFim && combinaSituacaoPagamento(m, getFiltroPagamento());
             });
 
             let totalKm = 0;
@@ -2813,6 +2831,8 @@
             manutencaoPaginaAtual = 1;
             document.getElementById('filtro-manutencao-busca').value = '';
             document.querySelectorAll('#lista-filtro-categorias .chk-filtro-categoria').forEach(c => c.checked = false);
+            const selPag = document.getElementById('filtro-manutencao-pagamento');
+            if (selPag) selPag.value = '';
             atualizarLabelFiltroCategorias();
             limparDatasGlobais();
         }
@@ -2844,7 +2864,7 @@
                 const combinaCategoria = categoriasSel.length === 0 || categoriasSelecionadasNormalizadas.includes(categoriaRegistro);
                 const combinaDataInicio = dataInicio ? m.data >= dataInicio : true;
                 const combinaDataFim = dataFim ? m.data <= dataFim : true;
-                return combinaBusca && combinaCategoria && combinaDataInicio && combinaDataFim;
+                return combinaBusca && combinaCategoria && combinaDataInicio && combinaDataFim && combinaSituacaoPagamento(m, getFiltroPagamento());
             });
 
             if (filtradas.length === 0) {
