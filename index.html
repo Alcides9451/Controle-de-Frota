@@ -1740,7 +1740,9 @@
                     Categoria: m.categoria || 'Sem Categoria',
                     Peca_Trocada: m.peca || '',
                     Valor: m.valor || 0,
-                    Garantia: formatarDataBR(m.garantia)
+                    Garantia: formatarDataBR(m.garantia),
+                    Status: m.dataPagamento ? 'Pago' : 'Pendente',
+                    Data_Pagamento: m.dataPagamento ? formatarDataBR(m.dataPagamento) : '-'
                 }));
             }
 
