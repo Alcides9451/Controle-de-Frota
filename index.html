@@ -212,10 +212,7 @@
             <span id="sincronizacao-badge" class="hidden absolute -top-1 -right-1 bg-amber-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">0</span>
         </button>
         <div id="sincronizacao-acoes" class="flex flex-wrap items-center justify-end gap-2">
-        <span id="sincronizacao-status" class="hidden md:inline-block bg-white border border-slate-200 shadow-lg rounded-lg px-3 py-2 text-xs text-slate-600">0 alterações pendentes</span>
-        <button id="btn-sincronizar" onclick="sincronizarAgora()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" title="Enviar as alterações temporárias para o banco do Google Apps Script">
-            <i data-lucide="cloud-upload" class="w-4 h-4"></i> Salvar no servidor
-        </button>
+        <span id="sincronizacao-status" class="hidden md:inline-block bg-white border border-slate-200 shadow-lg rounded-lg px-3 py-2 text-xs text-slate-600">Dados salvos neste dispositivo</span>
         <button onclick="exportarBancoJSON()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-sm flex items-center gap-2" title="Exportar o banco local em formato JSON">
             <i data-lucide="download" class="w-4 h-4"></i> Exportar JSON
         </button>
@@ -1033,7 +1030,7 @@
             return mesISO;
         }
 
-        const API_URL = 'https://script.google.com/macros/s/AKfycbwMgQHaLgBCmyU6ZgySJwrLgxItCIPRowc7SODJaaJ0lgw_hsa-xDQ_e6-f3J8pq-tK/exec';
+        const API_URL = 'https://script.google.com/macros/s/AKfycbxN1eYRuswW7q43ky9H2UM4jRnWwWDg8KHBUVRnGHsq0wZjDoYmx3cDdJeP8t_6Pf9-/exec';
 
         // ===== CACHE LOCAL DO BANCO =====
         let DB_CACHE = {
@@ -1349,14 +1346,14 @@
                 const qtd = await contarPendenciasSync();
                 const status = document.getElementById('sincronizacao-status');
                 const botao = document.getElementById('btn-sincronizar');
-                if (status) status.textContent = qtd === 0 ? 'Tudo salvo no servidor' : `${qtd} alteração(ões) pendente(s)`;
+                if (status) status.textContent = 'Dados salvos neste dispositivo';
                 const badge = document.getElementById('sincronizacao-badge');
                 if (badge) {
                     badge.textContent = qtd > 99 ? '99+' : String(qtd);
                     badge.classList.toggle('hidden', qtd === 0);
                 }
-                if (status) status.classList.toggle('text-amber-600', qtd > 0);
-                if (botao) botao.disabled = qtd === 0 || SINCRONIZANDO;
+                if (status) status.classList.remove('text-amber-600');
+                if (botao) botao.disabled = true;
             } catch (erro) {
                 console.warn('Indicador de sincronização:', erro);
             }
@@ -1393,12 +1390,9 @@
             DB_CARREGANDO = (async () => {
                 await abrirIndexedDB();
                 const carregouLocal = await carregarDoIndexedDB();
-                // Primeiro entrega ao usuário os dados locais. Se não houver cache inicial
-                // ou se for solicitada uma atualização explícita, busca apenas o snapshot
-                // do servidor. NUNCA sincroniza alterações pendentes automaticamente.
-                if (!carregouLocal || force) {
-                    const resposta = await apiGet({ action: 'getDb' });
-                    await salvarSnapshotLocalCompleto(resposta.data || {});
+                // Todo o banco é local (IndexedDB). Não há consulta ao Google Apps Script.
+                if (!carregouLocal) {
+                    await salvarSnapshotLocalCompleto(DB_CACHE);
                 }
                 return DB_CACHE;
             })();
@@ -1442,7 +1436,6 @@
         async function putData(storeName, data) {
             const pronto = atualizarCacheAposSalvar(storeName, data);
             await idbSalvar(storeName, DB_CACHE[storeName]);
-            await idbAdicionarFila({ action: 'put', store: storeName, data: pronto });
             return pronto;
         }
 
@@ -1450,72 +1443,24 @@
             if (!Array.isArray(registros) || registros.length === 0) return [];
             const salvos = registros.map(registro => atualizarCacheAposSalvar(storeName, registro));
             await idbSalvar(storeName, DB_CACHE[storeName]);
-            await idbAdicionarFila({ action: 'putMany', store: storeName, data: salvos });
             return salvos;
         }
 
         async function deleteData(storeName, id) {
             atualizarCacheAposExcluir(storeName, id);
             await idbSalvar(storeName, DB_CACHE[storeName]);
-            await idbAdicionarFila({ action: 'delete', store: storeName, id });
             return true;
         }
 
         async function sincronizarFila({ silencioso = false } = {}) {
-            if (SINCRONIZANDO) return false;
-            const fila = await idbObterFila();
-            if (!fila.length) { atualizarIndicadorSincronizacao(); return true; }
-            SINCRONIZANDO = true;
-            const botao = document.getElementById('btn-sincronizar');
-            if (botao) botao.disabled = true;
-            try {
-                validarApiConfigurada();
-                for (let i = 0; i < fila.length; i++) {
-                    await apiPost(fila[i]);
-                    await idbExcluirFila(fila[i].seq);
-                }
-                atualizarIndicadorSincronizacao();
-                if (!silencioso) alert(`${fila.length} alteração(ões) salvas no Google Apps Script.`);
-                return true;
-            } catch (erro) {
-                console.error('Falha na sincronização:', erro);
-                atualizarIndicadorSincronizacao();
-                if (!silencioso) alert('As alterações continuam guardadas no IndexedDB. Não foi possível sincronizar agora: ' + (erro?.message || erro));
-                return false;
-            } finally {
-                SINCRONIZANDO = false;
-                atualizarIndicadorSincronizacao();
-            }
+            // Banco 100% local: nada é enviado para o Google Apps Script.
+            await limparFilaSync();
+            return true;
         }
 
         async function sincronizarAgora() {
-            if (operacaoEmAndamento || SINCRONIZANDO) return;
-            await executarComProgresso('Salvando alterações no servidor', 'Enviando as alterações acumuladas...', async (atualizar) => {
-                atualizar(15, 'Lendo a fila local...');
-                const ok = await sincronizarFila({ silencioso: true });
-                if (!ok) throw new Error('Não foi possível concluir a sincronização.');
-                atualizar(90, 'Atualizando as telas...');
-                await renderizarTodasGuias();
-            });
+            await limparFilaSync();
         }
-
-        function prepararSincronizacaoAoFechar() {
-            // O pagehide é a última oportunidade confiável para disparar a fila sem bloquear a saída.
-            try {
-                if (!navigator.sendBeacon || !API_URL) return;
-                idbObterFila().then(fila => {
-                    fila.forEach(item => {
-                        try {
-                            const pacote = JSON.stringify(item);
-                            navigator.sendBeacon(API_URL, new Blob([pacote], { type: 'text/plain;charset=utf-8' }));
-                        } catch (erro) { console.warn('Não foi possível enviar pendência no fechamento:', erro); }
-                    });
-                }).catch(() => {});
-            } catch (erro) { console.warn('Sincronização no fechamento:', erro); }
-        }
-
-        window.addEventListener('pagehide', prepararSincronizacaoAoFechar);
-        window.addEventListener('beforeunload', prepararSincronizacaoAoFechar);
 
         // ===== IMPORTAÇÃO / EXPORTAÇÃO DO BANCO LOCAL EM JSON =====
         async function exportarBancoJSON() {
@@ -1566,7 +1511,7 @@
                     throw new Error('O arquivo JSON não contém registros reconhecíveis do banco.');
                 }
 
-                const confirmou = confirm(`Importar ${total} registro(s) para o banco local?\n\nOs dados atuais do IndexedDB serão substituídos pelos dados deste arquivo. As alterações pendentes de sincronização também serão descartadas.`);
+                const confirmou = confirm(`Importar ${total} registro(s) para o banco local?\n\nOs dados atuais do IndexedDB serão substituídos pelos dados deste arquivo. `);
                 if (!confirmou) return;
 
                 await abrirIndexedDB();
@@ -1590,8 +1535,8 @@
         }
 
         async function atualizarDadosDoServidor() {
+            // Recarrega os dados do banco local (IndexedDB).
             try {
-                await sincronizarFila({ silencioso: true });
                 DB_CARREGADO = false;
                 await carregarBancoCompleto(true);
                 await renderizarTodasGuias();
@@ -1629,34 +1574,16 @@
             if (!user || !pass) return;
 
             try {
-                // A autenticação continua sendo validada pelo Google Apps Script.
-                // O IndexedDB não substitui a validação do servidor; ele é usado
-                // depois do login para manter a sessão e o funcionamento local.
-                const resposta = await apiPost({
-                    action: 'login',
-                    usuario: user,
-                    senhaHash: passHash
-                });
-
-                const usuarioEncontrado = resposta.ok ? resposta.data : null;
+                // A autenticação é feita exclusivamente no banco local (IndexedDB).
+                await carregarBancoCompleto();
+                const usuarios = await getAllData('usuarios');
+                const usuarioEncontrado = usuarios.find(u =>
+                    String(u.usuario).trim().toLowerCase() === user.toLowerCase() &&
+                    String(u.senhaHash || '') === passHash
+                );
 
                 if (usuarioEncontrado) {
-                    // Guarda localmente os dados mínimos necessários para a sessão.
-                    // Incluímos o hash digitado SOMENTE no cache local para permitir
-                    // eventual autenticação offline; nunca enviamos um novo payload
-                    // de usuário ao servidor nessa etapa.
-                    const usuarioLocal = {
-                        ...usuarioEncontrado,
-                        usuario: usuarioEncontrado.usuario || user,
-                        senhaHash: usuarioEncontrado.senhaHash || passHash,
-                        isAdmin: !!usuarioEncontrado.isAdmin,
-                        guias: Array.isArray(usuarioEncontrado.guias) ? usuarioEncontrado.guias : []
-                    };
-
-                    atualizarCacheAposSalvar('usuarios', usuarioLocal);
-                    await idbSalvar('usuarios', DB_CACHE.usuarios);
-
-                    sessionStorage.setItem('usuarioAutenticado', user);
+                    sessionStorage.setItem('usuarioAutenticado', usuarioEncontrado.usuario);
                     document.getElementById('modal-login').classList.add('hidden');
                     document.getElementById('form-login').reset();
                     document.getElementById('login-erro').classList.add('hidden');
@@ -1668,7 +1595,7 @@
             } catch (erro) {
                 console.error('Erro de autenticação:', erro);
                 document.getElementById('login-erro').classList.add('hidden');
-                alert('Não foi possível autenticar no servidor. Verifique a conexão com o Google Apps Script.');
+                alert('Não foi possível autenticar no banco local: ' + (erro?.message || erro));
             }
         }
 
@@ -1693,7 +1620,7 @@
             } catch (erro) {
                 console.error(erro);
                 fazerLogout();
-                alert('Não foi possível consultar o usuário no servidor.');
+                alert('Não foi possível consultar o usuário no banco local.');
             }
         }
 
@@ -1719,19 +1646,9 @@
         }
 
         async function fazerLogout() {
-            try {
-                const pendencias = await contarPendenciasSync();
-                if (pendencias > 0) {
-                    const ok = confirm(`Existem ${pendencias} alteração(ões) pendente(s). Deseja salvar no servidor antes de sair?`);
-                    if (ok) await sincronizarAgora();
-                }
-            } catch (erro) {
-                console.warn('Não foi possível verificar/sincronizar ao sair:', erro);
-            } finally {
-                sessionStorage.removeItem('usuarioAutenticado');
-                usuarioAtualObjeto = null;
-                document.getElementById('modal-login').classList.remove('hidden');
-            }
+            sessionStorage.removeItem('usuarioAutenticado');
+            usuarioAtualObjeto = null;
+            document.getElementById('modal-login').classList.remove('hidden');
         }
 
         function limparFiltrosRelatorio() {
